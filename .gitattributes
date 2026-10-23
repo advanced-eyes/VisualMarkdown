@@ -1,0 +1,2 @@
+# 예시 wiki 는 "읽고 다시 쓰면 바이트가 같다" 테스트의 기준이다. Windows 체크아웃(core.autocrlf)에서도 LF 로 둔다.
+examples/** text eol=lf

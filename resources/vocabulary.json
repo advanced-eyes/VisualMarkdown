@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "rules": 1,
+  "conceptKinds": [
+    { "code": "method", "label": "방법", "meaning": "알고리즘 · 모델 · 기법 · 절차", "examples": "Faster R-CNN, 이분 탐색" },
+    { "code": "component", "label": "구성요소", "meaning": "방법이나 시스템을 이루는 부품", "examples": "RPN, Focal Loss, 결제 모듈" },
+    { "code": "task", "label": "문제", "meaning": "풀려는 과제", "examples": "객체 검출, 기계 번역" },
+    { "code": "data", "label": "데이터", "meaning": "데이터셋 · 벤치마크 · 자료", "examples": "COCO, VOC 2007" },
+    { "code": "metric", "label": "지표", "meaning": "평가 기준", "examples": "mAP, BLEU, 응답 시간" },
+    { "code": "system", "label": "시스템", "meaning": "제품 · 서비스 · 도구(기획서에 많음)", "examples": "결제 서비스" },
+    { "code": "idea", "label": "원리", "meaning": "위에 들지 않는 원리 · 이론 · 현상", "examples": "어텐션, 클래스 불균형" }
+  ],
+  "relationKinds": [
+    { "code": "improves", "label": "개선", "direction": "새것 → 옛것", "meaning": "from 이 to 의 한계를 고쳤다", "examples": "Fast R-CNN → R-CNN" },
+    { "code": "uses", "label": "사용", "direction": "전체 → 부품", "meaning": "from 이 to 를 쓰거나 포함한다", "examples": "Faster R-CNN → RPN" },
+    { "code": "isA", "label": "종류", "direction": "하위 → 상위", "meaning": "from 은 to 의 한 종류다", "examples": "YOLO → 1단계 검출기" },
+    { "code": "solves", "label": "해결", "direction": "방법 → 문제", "meaning": "from 이 to 를 푼다", "examples": "YOLO → 객체 검출" },
+    { "code": "alternative", "label": "대안", "direction": "방향 없음(↔)", "meaning": "같은 문제를 다르게 푼다", "examples": "YOLO ↔ Faster R-CNN", "undirected": true }
+  ],
+  "statuses": [
+    { "code": "confirmed", "label": "확인됨" },
+    { "code": "proposed", "label": "AI 제안" }
+  ],
+  "columnKinds": [
+    { "code": "quantity", "label": "수치" },
+    { "code": "ordinal", "label": "순서" },
+    { "code": "nominal", "label": "범주" }
+  ]
+}
