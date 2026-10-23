@@ -202,7 +202,7 @@ Ocean/
 
 ## 8. 코드 규칙
 
-- 이 저장소의 코드는 [docs/CppConvention.md](docs/CppConvention.md) · [docs/Qt.md](docs/Qt.md) · [docs/Patterns.md](docs/Patterns.md) 를 따른다. Ocean `docs/` 의 같은 파일을 복사했다. 한쪽을 고치면 다른 쪽도 고친다.
+- 이 저장소의 코드는 [docs/CppConvention.md](docs/CppConvention.md) · [docs/Qt.md](docs/Qt.md) · [docs/Patterns.md](docs/Patterns.md) 를 따른다. Ocean `docs/` 의 같은 파일을 복사했다. 다른 점: `Qt.md` 에는 §3 UI Architecture 가 없다(라이브러리에는 아직 화면이 없다. 4층 위젯을 만들 때 Ocean 의 그 절을 다시 본다). 그 밖에는 한쪽을 고치면 다른 쪽도 고친다.
 - 요점: PascalCase, 타입 접두 이름(`strName` · `vecRows` · `bCumulative`), 매개변수는 접두 없음, 클래스 멤버 `m_`, enum 은 `E` 로 시작하고 값은 대문자, 함수 이름은 동사로 시작, include 순서(대응 헤더 → 이 저장소 → 외부 → 표준), 매직 넘버는 `constexpr` 상수.
 - Ocean 과 다른 점: `pch.h` 가 없다. `.cpp` 의 맨 앞은 대응 헤더다.
 - 라이선스(Ocean `docs/LicenseCompliance.md`): Qt5 LGPLv3 로 상용 배포한다. Core · Gui · Widgets · Svg 같은 LGPL 모듈만 쓴다. **Qt Charts · Qt Data Visualization 은 오픈소스판이 GPLv3 전용이라 쓰지 않는다.** 차트 위젯(4층, 6단계)은 `QPainter` 로 그린다. GPL · AGPL · 출처 불명 코드는 들이지 않는다.

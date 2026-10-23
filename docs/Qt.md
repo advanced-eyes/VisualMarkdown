@@ -371,8 +371,3 @@ bool MyWidget::eventFilter(QObject* watched, QEvent* event)
     return QWidget::eventFilter(watched, event);
 }
 ```
-
-## 3. UI Architecture
-
-- 간편한 UI 교체를 위해 비지니스 로직과 뷰 로직을 분리한다.
-- `ui`파일을 활용하여 UI 개발을 진행한다.
