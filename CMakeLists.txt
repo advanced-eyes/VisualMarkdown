@@ -29,9 +29,14 @@ endif()
 ################################################################################
 # VisualMarkdown : format/ 의 파일 규칙대로 지식 파일을 읽고 쓰는 정적 라이브러리
 ################################################################################
-file(GLOB VISUALMARKDOWN_SOURCES CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/VisualMarkdown/*.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/VisualMarkdown/*.cpp)
+# 하위 폴더(Interface · Algorithm 등)까지 모은다. UI/ 는 4층(QtWidgets) 타깃 VisualMarkdownView 의 자리라
+# 이 타깃(QtCore 만)에는 넣지 않는다(design/Views.md §3). 경로에 정규식 글자가 있어도 되도록 상대 경로로 걸러 낸다.
+set(VISUALMARKDOWN_CORE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/VisualMarkdown)
+file(GLOB_RECURSE VISUALMARKDOWN_SOURCES RELATIVE ${VISUALMARKDOWN_CORE_SOURCE_DIR} CONFIGURE_DEPENDS
+    ${VISUALMARKDOWN_CORE_SOURCE_DIR}/*.h
+    ${VISUALMARKDOWN_CORE_SOURCE_DIR}/*.cpp)
+list(FILTER VISUALMARKDOWN_SOURCES EXCLUDE REGEX "^UI/")
+list(TRANSFORM VISUALMARKDOWN_SOURCES PREPEND ${VISUALMARKDOWN_CORE_SOURCE_DIR}/)
 
 # vocabulary.json 은 :/visualmarkdown/ 아래에 들어간다. 정적 라이브러리의 qrc 는 저절로 붙지 않아 KnowledgeVocabulary::Get() 이 등록한다.
 add_library(VisualMarkdown STATIC ${VISUALMARKDOWN_SOURCES} resources/VisualMarkdown.qrc)
