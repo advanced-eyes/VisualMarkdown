@@ -157,7 +157,7 @@ showcase 에서 나와야 하는 것(테스트로 확인한다)
 ```cpp
 enum class EChartType { NONE, BAR, STEP_BAR, LINE, SCATTER };
 
-struct ChartPoint  { double dX = 0; std::optional<double> optY; QString strLabel; };
+struct ChartPoint  { double dX = 0; std::optional<double> optY; double dBase = 0; QString strLabel; };   // dBase: 막대가 시작하는 값
 struct ChartSeries { QString strName; QString strUnit; int iAxis = 0; QVector<ChartPoint> vecPoints; };
 struct ChartAxis   { QString strTitle; QString strUnit; double dMin = 0; double dMax = 0; QVector<double> vecTicks; QStringList vecCategories; };
 struct ChartSpec
@@ -179,8 +179,8 @@ struct ChartSpec
 4. y 단위가 둘이면 y 축 둘(첫 단위 왼쪽 · 둘째 오른쪽). 셋 이상이면 셋째부터는 오른쪽 축에 두고 경고를 단다.
 5. 빈 칸은 값 없음이다. 선은 그 자리에서 끊고, 막대와 점은 그리지 않는다.
 6. 숫자는 `IsQuantityText` 와 같은 꼴로 읽는다(천 단위 쉼표 · 부호 · 지수).
-7. 축 범위: 막대 · 단계 막대는 0 을 넣는다. 선 · 산점도는 값 범위에 여유를 둔다. 눈금은 1 · 2 · 5 × 10ⁿ 간격으로 5–8개.
-8. 단계 막대: 첫 막대는 0 부터, 그다음은 앞 값에서 이 값까지. 늘어남과 줄어듦을 다른 색으로(파랑 · 주황, 빨강 · 초록만으로 나누지 않는다).
+7. 축 범위: 막대 · 단계 막대는 0 을 넣는다. 선 · 산점도는 값 범위의 양쪽에 5% 여유를 두되, 값이 모두 0 이상(또는 모두 0 이하)이면 여유가 0 을 넘지 않는다. 눈금은 1 · 2 · 5 × 10ⁿ 간격으로 5–8개이고, 범위 끝은 바깥 눈금에 맞춘다. 범주 x 축은 −0.5 … 범주 수 − 0.5 이고 눈금이 없다.
+8. 단계 막대: 첫 막대는 0 부터, 그다음은 앞 값(빈 칸을 건너뛴 앞 값)에서 이 값까지. 시작 값은 `dBase` 에 담는다. 늘어남과 줄어듦을 다른 색으로(파랑 · 주황, 빨강 · 초록만으로 나누지 않는다).
 9. 제목은 표 제목, 밑글은 `condition · where`.
 
 showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한다(테스트로 확인한다).
@@ -224,3 +224,4 @@ showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한�
 - 힘 배치는 단순하고 결정적이라 보기 좋지 않을 수 있다. 스냅샷을 보고 다듬는다.
 - 점이 수천 개면 관계망 배치가 느리다(반복마다 점 쌍 전부). 지금은 showcase 크기에 맞춘다.
 - Ocean 에 붙일 때 Ocean 의 Presenter · 테마 mapper 가 필요하다.
+- 차트 축: double 끝(1e308 근처)이나 2^53 를 넘는 한 값은 축이 무한대 · 폭 0 이 될 수 있다. 위젯은 폭 0 인 축을 ±1 로 넓혀 그린다. 실제 표에서는 나오지 않는 값이라 차트 설정은 그대로 둔다.
