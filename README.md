@@ -242,6 +242,13 @@ Ocean/
 
 - 문법이나 어휘가 바뀌면(종류를 더하기만 해도) `format` 판을 올린다. `resources/vocabulary.json` · [Vocabulary.md](format/Vocabulary.md) · 바뀐 문법 문서를 함께 고친다.
 - `examples/wiki/` 는 Ocean 이 쓰는 정준 모양이다. 문서 파일의 정해진 부분을 고치면 `digest` 를 다시 계산한다([ReadWrite.md §6](format/ReadWrite.md#6-digest)).
+- **새 시각화는 예시와 함께 더한다.** 보기 · 차트 종류를 더하거나, 보기가 읽는 칸(개념 · 관계 종류, 열 종류, `ocean:data` 키 등)을 더하거나 뜻을 바꾸면, 같은 커밋에서 [examples/showcase](examples/showcase/) 에 그 경우를 보이는 예시를 더한다.
+  - wiki 파일: 문서 · 개념 파일. 정해진 부분을 고치면 `digest` 를 다시 계산한다.
+  - showcase README 의 기대값: §1 표의 "시험하는 것", §2 · §3 의 기대값
+  - 그 기대값을 보는 시험: `ShowcaseWikiTest`, 배치 · 차트 시험
+  - 보기 앱 스냅샷의 기대 목록: `tests/viewer/showcase-snapshot.tsv`. 새 보기면 스냅샷에도 그 보기를 넣는다.
+  - 보기 앱으로 열어 눈으로도 확인한다.
+  - 문법 · 어휘가 바뀌는 것이면 위 규칙대로 `format` 문서와 `examples/wiki` 도 고친다.
 - 옮기기 전에는 Ocean 코드가 기준이다. Ocean 쪽 지식 형식이 바뀌면 이 폴더도 고친다. 옮긴 뒤에는 이 저장소가 기준이다(1층은 3단계부터, 2층은 4단계부터).
 
 ## 10. 정하지 않은 것

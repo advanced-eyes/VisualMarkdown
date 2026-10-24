@@ -92,3 +92,4 @@
 
 - 정해진 부분을 고치면 `digest` 를 다시 계산한다([ReadWrite.md §6](../../format/ReadWrite.md#6-digest)).
 - 기대값이 바뀌면 이 문서와 `tests/ShowcaseWikiTest.cpp` 를 같은 커밋에서 고친다. 문서 · 표가 바뀌면 보기 앱 스냅샷의 기대 목록 `tests/viewer/showcase-snapshot.tsv` 도 고친다.
+- 라이브러리에 새 보기 · 차트 종류 · 보기가 읽는 칸을 더하면, 그 경우를 이 wiki 에 더한다([README §9](../../README.md#9-바꾸는-규칙)). §1 표의 "시험하는 것" 과 §2 · §3 의 기대값도 함께 고친다. 이 wiki 가 모든 시각화를 한 번에 시험한다는 약속을 지키려는 것이다.
