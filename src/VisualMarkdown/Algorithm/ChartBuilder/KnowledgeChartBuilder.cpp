@@ -2,6 +2,7 @@
 
 #include "VisualMarkdown/Algorithm/ChartBuilder/Common/ChartBuilderCommon.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/BarChartCPU.h"
+#include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/DonutChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/HeatmapChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/LineChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/ScatterChartCPU.h"
@@ -22,7 +23,7 @@ KnowledgeChartBuilder::KnowledgeChartBuilder()
     // 그리는 종류마다 전략 하나(Patterns.md §1.2). NONE 은 전략 없이 까닭만 남긴다
     std::unique_ptr<IChartBuilderStrategy> arrStrategies[] = {
         std::make_unique<BarChartCPU>(), std::make_unique<StepBarChartCPU>(), std::make_unique<LineChartCPU>(), std::make_unique<ScatterChartCPU>(),
-        std::make_unique<HeatmapChartCPU>(),
+        std::make_unique<HeatmapChartCPU>(), std::make_unique<DonutChartCPU>(),
     };
     for (std::unique_ptr<IChartBuilderStrategy>& upStrategy : arrStrategies)
     {
@@ -42,6 +43,9 @@ EChartType KnowledgeChartBuilder::Recommend(const KnowledgeTable& table)
     switch (KnowledgeText::ClassifyColumn(table, columns.iX))
     {
     case EColumnKind::NOMINAL:
+        // 몫 표(series 없이 y 하나 · 단위 % · 행 2–6 · 값 0 이상 · 합 100 ± 1)는 도넛. 히트맵 규칙보다 먼저 본다(도넛은 계열이 하나라 둘이 겹치지 않는다)
+        if (ChartBuilderCommon::IsShareTable(table, columns))
+            return EChartType::DONUT;
         // 계열(수치인 y 열 수 × series 값 수)이 넷부터는 나란한 막대의 값 글이 겹치고 색만으로 가르기 어렵다: 칸마다 값을 쓰는 히트맵
         return ChartBuilderCommon::CountSeries(table, columns) >= kHeatmapMinSeries ? EChartType::HEATMAP : EChartType::BAR;
     case EColumnKind::ORDINAL:

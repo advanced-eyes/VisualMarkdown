@@ -111,6 +111,36 @@ const QString kHeatPerColumnNote = QStringLiteral("y 열마다 따로 칠한다"
 const QString kHeatEmptyCell = QStringLiteral("—");
 const QString kHeatJoin = QStringLiteral(" · ");
 
+// 도넛(design/MoreViews.md §5.3)
+constexpr double kDonutInnerRatio = 0.6;        // 안쪽 반지름 = 바깥 반지름 × 이 값
+constexpr double kDonutMaxDiameter = 480;       // 바깥 지름의 위 한계(글자 크기에 견줘 고리가 지나치게 커지지 않게)
+constexpr double kDonutMinDiameterBesideLegend = 60;   // 범례 목록 옆 고리가 이보다 작아지는 좁은 위젯은 범례 목록 없이 고리만 그린다
+constexpr double kDonutSliceGap = 2;            // 조각 사이 바탕 색 틈
+constexpr double kDonutGapOverhang = 1;         // 틈 선은 고리 안팎으로 이만큼 더 그어 끝까지 가른다
+constexpr double kDonutFullTurn = 360;          // 도
+constexpr double kDonutQuarterTurn = 90;
+constexpr double kDonutTwelveOClock = 90;       // QPainterPath 의 각(3시가 0, 반시계로 는다)에서 12시
+constexpr double kDonutMinLabelAngle = 20;      // 조각 글(몫)은 이 각 이상인 조각에만 쓴다
+constexpr double kDonutAngleTolerance = 1e-9;   // 각을 견줄 때의 계산 오차
+constexpr double kDonutPercentScale = 100;
+constexpr int kDonutShareDecimals = 1;          // 몫은 소수 한 자리까지(끝의 0 은 뺀다)
+constexpr double kDonutLabelPadding = 2;        // 조각 글이 조각 안에 들어가는지 볼 때 글 상자 둘레 여유
+constexpr double kDonutLegendGap = 32;          // 고리와 범례 목록 사이
+constexpr double kDonutSwatchSize = 12;         // 범례 견본(정사각형)
+constexpr double kDonutSwatchRadius = 3;
+constexpr double kDonutSwatchTextGap = 8;       // 견본과 범주 글 사이
+constexpr double kDonutColumnGap = 16;          // 범례 칸(범주 글 · 값 · 몫) 사이
+constexpr double kDonutRowGap = 8;              // 범례 줄 사이
+constexpr double kDonutMaxLabelRatio = 0.3;     // 범례의 범주 글 칸은 위젯 너비의 이만큼까지(넘치는 글은 줄인다)
+constexpr double kDonutMarkHalfSize = 4;        // GetMarkRect: 조각 가운데 점 둘레 사각형의 반 변
+constexpr double kDonutCenterLineGap = 4;       // 가운데 두 줄(y 열 이름 · 합) 사이
+constexpr double kDonutCenterWidthRatio = 0.9;  // 가운데 글은 구멍을 가로지르는 현의 이만큼까지 쓴다
+
+const QString kDonutTotalText = QStringLiteral("합 %1");
+const QString kDonutToolTip = QStringLiteral("%1: %2 (전체의 %3)");
+const QString kDonutValueToolTip = QStringLiteral("%1: %2");   // 값이 곧 몫일 때(ChartShare: 단위 % · 합 100 ± 1)
+const QString kPercentUnit = QStringLiteral("%");              // 몫 글에 붙이는 단위
+
 const QString kNoneTitle = QStringLiteral("차트로 그리지 않는 표");
 const QString kNoValueTitle = QStringLiteral("그릴 값이 없다");
 const QString kMissingLabel = QStringLiteral("값 없음");
@@ -327,6 +357,49 @@ int FindEdgeIndex(const QVector<double>& edges, double value)
             iIndex = iEdge;
     return iIndex;
 }
+
+// 도넛 몫(0–1)을 % 글로: 소수 한 자리까지 쓰고 끝의 0 은 뺀다(61.5% · 18%)
+QString FormatShare(double share)
+{
+    QString strText = FormatFixed(share * kDonutPercentScale, kDonutShareDecimals);
+    if (strText.contains(QLatin1Char('.')) && !strText.contains(QLatin1Char('e')))
+    {
+        while (strText.endsWith(QLatin1Char('0')))
+            strText.chop(1);
+        if (strText.endsWith(QLatin1Char('.')))
+            strText.chop(1);
+    }
+    return AppendUnit(strText, kPercentUnit);
+}
+
+// center 에서 radius 만큼, 12시에서 시계 방향으로 angle(도) 돈 자리(위젯 좌표, y 는 아래로)
+QPointF MapClockPoint(const QPointF& center, double radius, double angle)
+{
+    const double dRadians = angle * kPi / kHalfTurnDegrees;
+    return QPointF(center.x() + radius * std::sin(dRadians), center.y() - radius * std::cos(dRadians));
+}
+
+// 고리 조각: 12시에서 시계 방향으로 start 부터 sweep 도, 반지름 inner … outer. 한 바퀴면 구멍 뚫린 원이다
+QPainterPath MakeSlicePath(const QPointF& center, double inner, double outer, double start, double sweep)
+{
+    const QRectF rectOuter(center.x() - outer, center.y() - outer, 2 * outer, 2 * outer);
+    const QRectF rectInner(center.x() - inner, center.y() - inner, 2 * inner, 2 * inner);
+    QPainterPath path;
+    if (sweep >= kDonutFullTurn - kDonutAngleTolerance)
+    {
+        path.setFillRule(Qt::OddEvenFill);
+        path.addEllipse(rectOuter);
+        path.addEllipse(rectInner);
+        return path;
+    }
+    // QPainterPath 의 각은 3시가 0 이고 반시계로 는다: 12시에서 시계 방향으로 start 는 90 − start 다
+    const double dPathStart = kDonutTwelveOClock - start;
+    path.arcMoveTo(rectOuter, dPathStart);
+    path.arcTo(rectOuter, dPathStart, -sweep);
+    path.arcTo(rectInner, dPathStart - sweep, sweep);
+    path.closeSubpath();
+    return path;
+}
 }
 
 KnowledgeChartView::KnowledgeChartView(QWidget* parent)
@@ -364,6 +437,12 @@ QPair<int, int> KnowledgeChartView::FindPointAt(const QPoint& pos) const
             return qMakePair(-1, -1);
         const int iPoint = ComputeHeatmapCells()[pairCell.second].value(pairCell.first, -1);
         return iPoint >= 0 ? qMakePair(pairCell.second, iPoint) : qMakePair(-1, -1);
+    }
+    if (m_spec.eType == EChartType::DONUT)
+    {
+        // 도넛: 각 · 반지름으로 찾은 조각(첫 계열의 점)
+        const int iPoint = FindDonutSliceAt(geometry, QPointF(pos));
+        return iPoint >= 0 ? qMakePair(0, iPoint) : qMakePair(-1, -1);
     }
     const QVector<QVector<QRectF>> vecMarks = ComputeMarks(geometry);
     const QPointF ptPos(pos);
@@ -411,6 +490,8 @@ QString KnowledgeChartView::GetToolTipAt(const QPoint& pos) const
     const QPair<int, int> pairPoint = FindPointAt(pos);
     if (pairPoint.first < 0)
         return QString();
+    if (m_spec.eType == EChartType::DONUT)
+        return MakeDonutToolTip(pairPoint.second);
     return MakePointToolTip(pairPoint.first, pairPoint.second);
 }
 
@@ -428,6 +509,15 @@ QRectF KnowledgeChartView::GetMarkRect(int series, int point) const
         if (iRow < 0 || ComputeHeatmapCells()[series].value(iRow, -1) != point)
             return QRectF();
         return GetHeatmapCellRect(geometry, iRow, series);
+    }
+    if (m_spec.eType == EChartType::DONUT)
+    {
+        // 도넛: 조각 가운데 점 둘레의 작은 사각형(첫 계열, 각이 0 보다 큰 조각만)
+        const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+        if (series != 0 || !(vecSlices[point].dSweep > 0))
+            return QRectF();
+        const QPointF ptCenter = GetDonutSliceCenter(geometry, vecSlices[point]);
+        return QRectF(ptCenter.x() - kDonutMarkHalfSize, ptCenter.y() - kDonutMarkHalfSize, 2 * kDonutMarkHalfSize, 2 * kDonutMarkHalfSize);
     }
     return ComputeMarks(geometry)[series][point];
 }
@@ -501,6 +591,12 @@ void KnowledgeChartView::paintEvent(QPaintEvent* event)
         DrawHeatmap(painter, geometry);
         return;
     }
+    if (m_spec.eType == EChartType::DONUT)
+    {
+        DrawDonut(painter, geometry);
+        DrawDonutLegend(painter, geometry);
+        return;
+    }
     const QVector<QVector<QRectF>> vecMarks = ComputeMarks(geometry);
     DrawGrid(painter, geometry);
     DrawXAxis(painter, geometry);
@@ -544,6 +640,11 @@ KnowledgeChartView::ChartGeometry KnowledgeChartView::ComputeGeometry() const
     if (m_spec.eType == EChartType::HEATMAP)
     {
         ComputeHeatmapGeometry(&geometry, dLeft, dRight, dY, dBottomLimit);
+        return geometry;
+    }
+    if (m_spec.eType == EChartType::DONUT)
+    {
+        ComputeDonutGeometry(&geometry, dLeft, dRight, dY, dBottomLimit);
         return geometry;
     }
 
@@ -1204,6 +1305,13 @@ bool KnowledgeChartView::ShowsMessage() const
 {
     if (m_spec.eType == EChartType::NONE || m_spec.vecSeries.isEmpty())
         return true;
+    if (m_spec.eType == EChartType::DONUT)
+    {
+        // 도넛: 0 보다 큰 값이 없으면 "그릴 값이 없다"
+        double dTotal = 0;
+        ComputeDonutSlices(&dTotal);
+        return !(dTotal > 0);
+    }
     if (m_spec.eType != EChartType::HEATMAP)
         return false;
     // 히트맵: 값이 있는 칸이 하나도 없으면 "그릴 값이 없다"
@@ -1535,6 +1643,298 @@ void KnowledgeChartView::DrawHeatmap(QPainter& painter, const ChartGeometry& geo
                 painter.setPen(m_theme.mutedText);
                 painter.drawText(rectCell, Qt::AlignCenter, kHeatEmptyCell);
             }
+        }
+    }
+}
+
+void KnowledgeChartView::ComputeDonutGeometry(ChartGeometry* geometry, double left, double right, double top, double bottom) const
+{
+    // ShowsMessage 가 아니면(0 보다 큰 값이 있으면) 첫 계열이 있다
+    DonutGeometry& donut = geometry->donut;
+    const QFontMetricsF metrics(MakeFont(m_theme.iLabelFontPx));
+    const double dLineHeight = metrics.height();
+    const double dWidth = right - left;
+    const QVector<ChartPoint>& vecPoints = m_spec.vecSeries.first().vecPoints;
+    const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+
+    // 범례 칸 너비: 범주 글(위젯 너비의 30 % 까지, 넘치면 줄인다) · 값과 단위 · 몫. 값이 곧 몫이면(단위 % · 합 100 ± 1) 몫 칸이 없다
+    const bool bShare = ShowsDonutShare();
+    for (int iPoint = 0; iPoint < vecPoints.size(); ++iPoint)
+    {
+        donut.dLabelWidth = std::max(donut.dLabelWidth, metrics.horizontalAdvance(vecPoints[iPoint].strLabel));
+        donut.dValueWidth = std::max(donut.dValueWidth, metrics.horizontalAdvance(MakeDonutValueText(vecPoints[iPoint])));
+        if (bShare && vecSlices[iPoint].bSlice)
+            donut.dShareWidth = std::max(donut.dShareWidth, metrics.horizontalAdvance(FormatShare(vecSlices[iPoint].dShare)));
+    }
+    donut.dLabelWidth = std::min(donut.dLabelWidth, std::max(0.0, dWidth * kDonutMaxLabelRatio));
+    double dLegendWidth = kDonutSwatchSize + kDonutSwatchTextGap + donut.dLabelWidth + kDonutColumnGap + donut.dValueWidth;
+    if (bShare)
+        dLegendWidth += kDonutColumnGap + donut.dShareWidth;
+
+    // 고리: 바깥 지름은 그림 칸(제목 · 밑글 아래, 범례 목록 왼쪽)의 높이 · 너비 가운데 작은 쪽이되 480px 를 넘지 않는다(정수 화소).
+    // 고리는 그림 칸 위에 붙인다(가운데로 띄우지 않는다). 안쪽 반지름은 바깥의 60 %.
+    // 범례 목록 옆 고리가 60px 보다 작아지는 좁은 위젯에서는 범례 목록을 쓰지 않고 고리만 그린다(위젯 밖으로 나가거나 고리가 점이 되지 않게)
+    const double dRingWidth = dWidth - dLegendWidth - kDonutLegendGap;
+    const bool bLegend = dRingWidth >= kDonutMinDiameterBesideLegend;
+    const double dDiameter = std::max(kMinPlotSize, std::floor(std::min({ bottom - top, bLegend ? dRingWidth : dWidth, kDonutMaxDiameter })));
+    geometry->plot = QRectF(left, top, dDiameter, dDiameter);
+    donut.center = geometry->plot.center();
+    donut.dOuter = dDiameter / 2;
+    donut.dInner = donut.dOuter * kDonutInnerRatio;
+
+    // 범례 목록: 고리 오른쪽, 고리 가운데 높이에 맞춘다. 고리보다 높으면 위에 맞추고 아래로 넘치는 줄은 쓰지 않는다
+    const int iRows = vecPoints.size();
+    const double dLegendHeight = iRows * dLineHeight + std::max(0, iRows - 1) * kDonutRowGap;
+    const double dLegendLeft = std::round(geometry->plot.right() + kDonutLegendGap);
+    double dRowTop = std::round(std::max(top, donut.center.y() - dLegendHeight / 2));
+    for (int iRow = 0; iRow < iRows; ++iRow)
+    {
+        QRectF rectRow(dLegendLeft, dRowTop, dLegendWidth, dLineHeight);
+        if (!bLegend || rectRow.bottom() > bottom)
+            rectRow = QRectF();
+        donut.vecLegendRows << rectRow;
+        if (!rectRow.isEmpty())
+            geometry->legend = geometry->legend.united(rectRow);
+        dRowTop += dLineHeight + kDonutRowGap;
+    }
+}
+
+QVector<KnowledgeChartView::DonutSlice> KnowledgeChartView::ComputeDonutSlices(double* total) const
+{
+    QVector<DonutSlice> vecSlices;
+    if (total != nullptr)
+        *total = 0;
+    if (m_spec.vecSeries.isEmpty())
+        return vecSlices;
+    const QVector<ChartPoint>& vecPoints = m_spec.vecSeries.first().vecPoints;
+
+    // 몫은 가장 큰 값으로 나눈 값들의 합에 대한 비율로 구한다(아주 큰 값을 더해도 넘치지 않게)
+    double dLargest = 0;
+    for (const ChartPoint& point : vecPoints)
+        if (point.optY && std::isfinite(*point.optY))
+            dLargest = std::max(dLargest, *point.optY);
+    double dScaledTotal = 0;
+    if (dLargest > 0)
+        for (const ChartPoint& point : vecPoints)
+            if (point.optY && std::isfinite(*point.optY) && *point.optY > 0)
+                dScaledTotal += *point.optY / dLargest;
+
+    // 조각은 12시에서 시계 방향, 행(점) 순서로 잇는다. 조각이 아닌 점 · 0 인 점은 각이 0 이다
+    double dStart = 0;
+    for (const ChartPoint& point : vecPoints)
+    {
+        DonutSlice slice;
+        slice.bSlice = point.optY && std::isfinite(*point.optY) && *point.optY >= 0;
+        slice.dStart = dStart;
+        if (slice.bSlice && dScaledTotal > 0)
+        {
+            slice.dShare = *point.optY / dLargest / dScaledTotal;
+            slice.dSweep = slice.dShare * kDonutFullTurn;
+        }
+        dStart += slice.dSweep;
+        vecSlices << slice;
+    }
+    if (total != nullptr)
+        *total = dLargest * dScaledTotal;
+    return vecSlices;
+}
+
+int KnowledgeChartView::FindDonutSliceAt(const ChartGeometry& geometry, const QPointF& pos) const
+{
+    const DonutGeometry& donut = geometry.donut;
+    const double dDistance = QLineF(donut.center, pos).length();
+    if (geometry.plot.isEmpty() || dDistance < donut.dInner || dDistance > donut.dOuter)
+        return -1;
+    // 12시에서 시계 방향으로 잰 각(0 … 360)
+    double dAngle = std::atan2(pos.x() - donut.center.x(), donut.center.y() - pos.y()) * kHalfTurnDegrees / kPi;
+    if (dAngle < 0)
+        dAngle += kDonutFullTurn;
+    // 조각 사이 틈은 그 각이 든 조각으로 본다(틈에서 설명이 깜빡이지 않게).
+    // 마지막 조각의 끝(계산 오차로 360 에 조금 못 미칠 수 있다)부터 12시까지는 마지막 조각이다
+    const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+    int iLast = -1;
+    for (int iPoint = 0; iPoint < vecSlices.size(); ++iPoint)
+    {
+        const DonutSlice& slice = vecSlices[iPoint];
+        if (!(slice.dSweep > 0))
+            continue;
+        if (dAngle >= slice.dStart && dAngle < slice.dStart + slice.dSweep)
+            return iPoint;
+        iLast = iPoint;
+    }
+    return iLast;
+}
+
+QPointF KnowledgeChartView::GetDonutSliceCenter(const ChartGeometry& geometry, const DonutSlice& slice) const
+{
+    const DonutGeometry& donut = geometry.donut;
+    return MapClockPoint(donut.center, (donut.dInner + donut.dOuter) / 2, slice.dStart + slice.dSweep / 2);
+}
+
+QString KnowledgeChartView::MakeDonutValueText(const ChartPoint& point) const
+{
+    if (!point.optY)
+        return kMissingLabel;
+    return AppendUnit(FormatValue(*point.optY), m_spec.vecSeries.isEmpty() ? QString() : m_spec.vecSeries.first().strUnit);
+}
+
+QString KnowledgeChartView::MakeDonutToolTip(int point) const
+{
+    const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+    if (point < 0 || point >= vecSlices.size() || !vecSlices[point].bSlice)
+        return QString();
+    const ChartPoint& chartPoint = m_spec.vecSeries.first().vecPoints[point];
+    // 값이 곧 몫이면(단위 % · 합 100 ± 1) "(전체의 n%)" 를 쓰지 않는다
+    if (!ShowsDonutShare())
+        return kDonutValueToolTip.arg(chartPoint.strLabel, MakeDonutValueText(chartPoint));
+    return kDonutToolTip.arg(chartPoint.strLabel, MakeDonutValueText(chartPoint), FormatShare(vecSlices[point].dShare));
+}
+
+bool KnowledgeChartView::ShowsDonutShare() const
+{
+    double dTotal = 0;
+    ComputeDonutSlices(&dTotal);
+    const QString strUnit = m_spec.vecSeries.isEmpty() ? QString() : m_spec.vecSeries.first().strUnit;
+    return !(ChartShare::IsPercentUnit(strUnit) && ChartShare::IsWholePercent(dTotal));
+}
+
+void KnowledgeChartView::DrawDonut(QPainter& painter, const ChartGeometry& geometry) const
+{
+    const DonutGeometry& donut = geometry.donut;
+    const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+
+    // 조각: 12시에서 시계 방향, 행 순서. 색은 조각 자리의 계열 색(조각은 범주의 이름이라 범주색이다)
+    painter.setPen(Qt::NoPen);
+    int iDrawn = 0;
+    for (int iPoint = 0; iPoint < vecSlices.size(); ++iPoint)
+    {
+        const DonutSlice& slice = vecSlices[iPoint];
+        if (!(slice.dSweep > 0))
+            continue;
+        painter.fillPath(MakeSlicePath(donut.center, donut.dInner, donut.dOuter, slice.dStart, slice.dSweep), m_theme.GetSeriesColor(iPoint));
+        ++iDrawn;
+    }
+
+    // 조각 사이 2px 바탕 색 틈: 조각이 둘 이상이면 조각마다 시작 각에서 고리를 가로지르는 바탕 색 선
+    if (iDrawn > 1)
+    {
+        painter.setPen(QPen(m_theme.background, kDonutSliceGap, Qt::SolidLine, Qt::FlatCap));
+        for (const DonutSlice& slice : vecSlices)
+            if (slice.dSweep > 0)
+                painter.drawLine(MapClockPoint(donut.center, donut.dInner - kDonutGapOverhang, slice.dStart),
+                                 MapClockPoint(donut.center, donut.dOuter + kDonutGapOverhang, slice.dStart));
+    }
+
+    // 조각 글: 몫. 20° 이상인 조각에만 고리 띠 가운데 반지름 · 조각 가운데 각에 쓴다. 글 상자를 감싼 원이 띠 안이고 조각 양 끝 반지름 선에
+    // 닿지 않을 때만 쓴다(작은 고리에서 조각 밖으로 넘치지 않게). 글자 색은 채움과 대비가 큰 쪽
+    const QFont fontLabel = MakeFont(m_theme.iLabelFontPx);
+    const QFontMetricsF metrics(fontLabel);
+    painter.setFont(fontLabel);
+    const double dMiddle = (donut.dInner + donut.dOuter) / 2;
+    for (int iPoint = 0; iPoint < vecSlices.size(); ++iPoint)
+    {
+        const DonutSlice& slice = vecSlices[iPoint];
+        if (slice.dSweep + kDonutAngleTolerance < kDonutMinLabelAngle)
+            continue;
+        const QString strShare = FormatShare(slice.dShare);
+        const double dReach = std::hypot(metrics.horizontalAdvance(strShare), metrics.height()) / 2 + kDonutLabelPadding;
+        const double dHalfAngle = std::min(slice.dSweep / 2, kDonutQuarterTurn) * kPi / kHalfTurnDegrees;
+        if (dReach > (donut.dOuter - donut.dInner) / 2 || dReach > dMiddle * std::sin(dHalfAngle))
+            continue;
+        const QPointF ptCenter = GetDonutSliceCenter(geometry, slice);
+        painter.setPen(m_theme.GetFillTextColor(m_theme.GetSeriesColor(iPoint)));
+        painter.drawText(QRectF(ptCenter.x() - dReach, ptCenter.y() - dReach, 2 * dReach, 2 * dReach), Qt::AlignCenter, strShare);
+    }
+    DrawDonutCenter(painter, geometry);
+}
+
+void KnowledgeChartView::DrawDonutCenter(QPainter& painter, const ChartGeometry& geometry) const
+{
+    // 가운데: y 열 이름(흐린 글자), 그 아래 "합 {전체}{단위}"(굵은 글자). 두 줄이 구멍에 들어갈 때만 쓴다.
+    // 합은 제목 크기로 쓰고, 구멍이 작아 들어가지 않으면 이름표 크기로 줄인다(그래도 넘치면 '…' 로 줄인다)
+    const DonutGeometry& donut = geometry.donut;
+    double dTotal = 0;
+    ComputeDonutSlices(&dTotal);
+    const ChartSeries& series = m_spec.vecSeries.first();
+    const QString strName = m_spec.vecYAxes.isEmpty() ? series.strName : m_spec.vecYAxes.first().strTitle;
+    const QString strTotal = kDonutTotalText.arg(AppendUnit(FormatValue(dTotal), series.strUnit));
+    const QFont fontName = MakeFont(m_theme.iLabelFontPx);
+    const QFontMetricsF metricsName(fontName);
+    const bool bName = !strName.isEmpty();
+    // 글 줄 너비: 글 덩어리 위 · 아래 끝 높이에서 구멍을 가로지르는 현의 90 %. 덩어리가 구멍보다 높으면 0
+    const auto funcLineWidth = [&donut](double halfBlock)
+    {
+        if (halfBlock >= donut.dInner * kDonutCenterWidthRatio)
+            return 0.0;
+        return 2 * std::sqrt(donut.dInner * donut.dInner - halfBlock * halfBlock) * kDonutCenterWidthRatio;
+    };
+    QFont fontTotal = MakeFont(m_theme.iTitleFontPx, true);
+    double dHalfBlock = ((bName ? metricsName.height() + kDonutCenterLineGap : 0) + QFontMetricsF(fontTotal).height()) / 2;
+    if (QFontMetricsF(fontTotal).horizontalAdvance(strTotal) > funcLineWidth(dHalfBlock))
+    {
+        fontTotal = MakeFont(m_theme.iLabelFontPx, true);
+        dHalfBlock = ((bName ? metricsName.height() + kDonutCenterLineGap : 0) + QFontMetricsF(fontTotal).height()) / 2;
+    }
+    const QFontMetricsF metricsTotal(fontTotal);
+    const double dLineWidth = funcLineWidth(dHalfBlock);
+    if (!(dLineWidth > 0))
+        return;
+    double dY = donut.center.y() - dHalfBlock;
+    if (bName)
+    {
+        painter.setFont(fontName);
+        painter.setPen(m_theme.mutedText);
+        painter.drawText(QRectF(donut.center.x() - dLineWidth / 2, dY, dLineWidth, metricsName.height()), Qt::AlignCenter,
+                         metricsName.elidedText(strName, Qt::ElideRight, dLineWidth));
+        dY += metricsName.height() + kDonutCenterLineGap;
+    }
+    painter.setFont(fontTotal);
+    painter.setPen(m_theme.text);
+    painter.drawText(QRectF(donut.center.x() - dLineWidth / 2, dY, dLineWidth, metricsTotal.height()), Qt::AlignCenter,
+                     metricsTotal.elidedText(strTotal, Qt::ElideRight, dLineWidth));
+}
+
+void KnowledgeChartView::DrawDonutLegend(QPainter& painter, const ChartGeometry& geometry) const
+{
+    // 범례 목록: 줄마다 견본 · 범주 글 · 값과 단위 · 몫. 조각이 아닌 점(값 없음 · 0 보다 작음)은 견본을 비우고(테두리만) 흐린 글자로 쓰며 몫이 없다.
+    // 값이 곧 몫이면(단위 % · 합 100 ± 1) 몫 칸을 쓰지 않는다
+    const DonutGeometry& donut = geometry.donut;
+    const QVector<ChartPoint>& vecPoints = m_spec.vecSeries.first().vecPoints;
+    const QVector<DonutSlice> vecSlices = ComputeDonutSlices(nullptr);
+    const bool bShare = ShowsDonutShare();
+    const QFont fontLabel = MakeFont(m_theme.iLabelFontPx);
+    const QFontMetricsF metrics(fontLabel);
+    painter.setFont(fontLabel);
+    for (int iPoint = 0; iPoint < vecPoints.size() && iPoint < donut.vecLegendRows.size(); ++iPoint)
+    {
+        const QRectF& rectRow = donut.vecLegendRows[iPoint];
+        if (rectRow.isEmpty())
+            continue;
+        const DonutSlice& slice = vecSlices[iPoint];
+        const QRectF rectSwatch(rectRow.left(), std::round(rectRow.center().y() - kDonutSwatchSize / 2), kDonutSwatchSize, kDonutSwatchSize);
+        if (slice.bSlice)
+        {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(m_theme.GetSeriesColor(iPoint));
+            painter.drawRoundedRect(rectSwatch, kDonutSwatchRadius, kDonutSwatchRadius);
+        }
+        else
+        {
+            painter.setPen(QPen(m_theme.axis, 1));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(rectSwatch.adjusted(0.5, 0.5, -0.5, -0.5), kDonutSwatchRadius, kDonutSwatchRadius);
+        }
+        double dX = rectRow.left() + kDonutSwatchSize + kDonutSwatchTextGap;
+        painter.setPen(slice.bSlice ? m_theme.text : m_theme.mutedText);
+        painter.drawText(QRectF(dX, rectRow.top(), donut.dLabelWidth, rectRow.height()), Qt::AlignLeft | Qt::AlignVCenter,
+                         metrics.elidedText(vecPoints[iPoint].strLabel, Qt::ElideRight, donut.dLabelWidth));
+        dX += donut.dLabelWidth + kDonutColumnGap;
+        painter.drawText(QRectF(dX, rectRow.top(), donut.dValueWidth, rectRow.height()), Qt::AlignRight | Qt::AlignVCenter, MakeDonutValueText(vecPoints[iPoint]));
+        dX += donut.dValueWidth + kDonutColumnGap;
+        if (bShare && slice.bSlice)
+        {
+            painter.setPen(m_theme.mutedText);
+            painter.drawText(QRectF(dX, rectRow.top(), donut.dShareWidth, rectRow.height()), Qt::AlignRight | Qt::AlignVCenter, FormatShare(slice.dShare));
         }
     }
 }

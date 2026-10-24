@@ -41,6 +41,7 @@ constexpr int kFocalLossDocument = 1;
 constexpr int kYolo9000Document = 4;
 constexpr const char* kYolo9000Id = "5e2d8b10-7c4a-4f3e-b9d6-2a1f0c9e8d72";
 constexpr int kMonthlyTable = 0;     // 월별 응답 시간: 순서 x → 선, p95 에 빈 칸
+constexpr int kShareTable = 1;       // 결제 수단별 비중: 단위 % · 합 100 → 도넛
 constexpr int kLoadTable = 2;        // 동시 사용자와 응답 시간: 수치 x → 산점도
 constexpr int kPriorityTable = 3;    // 기능 우선순위: y 가 범주 → 그리지 않음
 constexpr const char* kMonthlyTitle = "월별 응답 시간";
@@ -285,7 +286,7 @@ private slots:
         }
     }
 
-    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵. 고르면 그 종류로, 추천이면 추천 종류로 다시 만든다.
+    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛. 고르면 그 종류로, 추천이면 추천 종류로 다시 만든다.
     // 나무의 표 글도 따라가고, 고른 종류는 표마다 기억한다
     void chartTypeBoxRebuildsChart()
     {
@@ -295,9 +296,10 @@ private slots:
         VisualMarkdownViewerChartPage* pPage = window.GetChartPage();
         QComboBox* pBox = pPage->GetChartTypeBox();
         const QStringList vecTexts { QStringLiteral("추천(선)"), QStringLiteral("막대"), QStringLiteral("단계 막대"), QStringLiteral("선"), QStringLiteral("산점도"),
-                                     QStringLiteral("히트맵") };
+                                     QStringLiteral("히트맵"), QStringLiteral("도넛") };
         const QVector<int> vecData { VisualMarkdownViewerChartPage::kRecommendedChoice, static_cast<int>(EChartType::BAR), static_cast<int>(EChartType::STEP_BAR),
-                                     static_cast<int>(EChartType::LINE), static_cast<int>(EChartType::SCATTER), static_cast<int>(EChartType::HEATMAP) };
+                                     static_cast<int>(EChartType::LINE), static_cast<int>(EChartType::SCATTER), static_cast<int>(EChartType::HEATMAP),
+                                     static_cast<int>(EChartType::DONUT) };
         QCOMPARE(pBox->count(), vecTexts.size());
         for (int iItem = 0; iItem < vecTexts.size(); ++iItem)
         {
@@ -308,7 +310,7 @@ private slots:
         QVERIFY(pBox->isEnabled());
 
         const QVector<QPair<int, EChartType>> vecChoices { { 1, EChartType::BAR }, { 2, EChartType::STEP_BAR }, { 4, EChartType::SCATTER }, { 5, EChartType::HEATMAP },
-                                                           { 3, EChartType::LINE } };
+                                                           { 6, EChartType::DONUT }, { 3, EChartType::LINE } };
         for (const QPair<int, EChartType>& pairChoice : vecChoices)
         {
             pBox->setCurrentIndex(pairChoice.first);
@@ -330,6 +332,15 @@ private slots:
         window.SelectTable(kPaymentDocument, kMonthlyTable);
         QCOMPARE(pBox->currentIndex(), 1);
         QCOMPARE(pPage->GetChartView()->GetSpec().eType, EChartType::BAR);
+
+        // 몫 표(결제 수단별 비중)는 추천이 도넛이다: 상자 첫 항목 · 나무의 표 글 · 차트가 도넛
+        window.SelectTable(kPaymentDocument, kShareTable);
+        QCOMPARE(pBox->currentIndex(), 0);
+        QCOMPARE(pBox->itemText(0), QStringLiteral("추천(도넛)"));
+        QCOMPARE(pPage->GetChartView()->GetSpec().eType, EChartType::DONUT);
+        QVERIFY2(window.FindTableItem(kPaymentDocument, kShareTable)->text(0).endsWith(QStringLiteral("(도넛)")),
+                 qUtf8Printable(window.FindTableItem(kPaymentDocument, kShareTable)->text(0)));
+        QVERIFY(!pPage->GetMessageLabel()->isVisible());   // 경고가 없다
     }
 
     // 차트로 그리지 않는 표(NONE): 까닭을 한 줄로 보이고 차트는 숨기며 표를 크게 보인다(상자는 쓸 수 없다).

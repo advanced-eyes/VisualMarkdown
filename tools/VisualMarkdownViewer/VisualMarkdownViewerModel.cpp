@@ -199,6 +199,7 @@ QString VisualMarkdownViewerModel::GetChartTypeKey(EChartType type)
     case EChartType::LINE: return QStringLiteral("LINE");
     case EChartType::SCATTER: return QStringLiteral("SCATTER");
     case EChartType::HEATMAP: return QStringLiteral("HEATMAP");
+    case EChartType::DONUT: return QStringLiteral("DONUT");
     }
     return QString();
 }
@@ -213,6 +214,7 @@ QString VisualMarkdownViewerModel::GetChartTypeLabel(EChartType type)
     case EChartType::LINE: return QStringLiteral("선");
     case EChartType::SCATTER: return QStringLiteral("산점도");
     case EChartType::HEATMAP: return QStringLiteral("히트맵");
+    case EChartType::DONUT: return QStringLiteral("도넛");
     }
     return QString();
 }

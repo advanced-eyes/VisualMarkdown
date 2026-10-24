@@ -6,7 +6,7 @@ graph-timeline.png	timeline
 graph-matrix.png	matrix			
 graph-bipartite.png	bipartite			
 chart-01-01.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	월별 응답 시간	LINE
-chart-01-02.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	결제 수단별 비중	BAR
+chart-01-02.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	결제 수단별 비중	DONUT
 chart-01-03.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	동시 사용자와 응답 시간	SCATTER
 chart-01-04.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	기능 우선순위	NONE
 chart-03-01.png	chart	1c4f7a32-8e9b-4c0d-a1e2-f3b4c5d6e794	2단계 검출기의 VOC 2007 정확도	BAR

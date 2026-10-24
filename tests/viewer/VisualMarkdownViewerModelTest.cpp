@@ -32,6 +32,7 @@ constexpr const char* kYoloFile = "documents/you-only-look-once-unified-real-tim
 constexpr int kPaymentDocument = 0;
 constexpr int kFocalLossDocument = 1;
 constexpr int kMonthlyTable = 0;      // 결제 기획서 > 월별 응답 시간(순서 x → 선)
+constexpr int kShareTable = 1;        // 결제 기획서 > 결제 수단별 비중(단위 % · 합 100 → 도넛)
 constexpr int kLoadTable = 2;         // 결제 기획서 > 동시 사용자와 응답 시간(수치 x → 산점도)
 constexpr int kPriorityTable = 3;     // 결제 기획서 > 기능 우선순위(y 가 범주 → 그리지 않음)
 
@@ -84,7 +85,7 @@ const QVector<ExpectedChart> kCharts {
     { kTwoStageTitle, "2단계 검출기의 VOC 2007 정확도", EChartType::BAR },
     { kTwoStageTitle, "학습 · 시험 시간", EChartType::BAR },
     { kPaymentTitle, "월별 응답 시간", EChartType::LINE },
-    { kPaymentTitle, "결제 수단별 비중", EChartType::BAR },
+    { kPaymentTitle, "결제 수단별 비중", EChartType::DONUT },
     { kPaymentTitle, "동시 사용자와 응답 시간", EChartType::SCATTER },
     { kPaymentTitle, "기능 우선순위", EChartType::NONE },
 };
@@ -241,6 +242,7 @@ private slots:
             { EChartType::LINE, { QStringLiteral("LINE"), QStringLiteral("선") } },
             { EChartType::SCATTER, { QStringLiteral("SCATTER"), QStringLiteral("산점도") } },
             { EChartType::HEATMAP, { QStringLiteral("HEATMAP"), QStringLiteral("히트맵") } },
+            { EChartType::DONUT, { QStringLiteral("DONUT"), QStringLiteral("도넛") } },
             { EChartType::NONE, { QStringLiteral("NONE"), QStringLiteral("그리지 않음") } },
         };
         for (const auto& pairName : vecNames)
@@ -272,10 +274,20 @@ private slots:
         QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::STEP_BAR);
         model.ChooseChart(kPaymentDocument, kMonthlyTable, EChartType::HEATMAP);
         QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::HEATMAP);
+        model.ChooseChart(kPaymentDocument, kMonthlyTable, EChartType::DONUT);
+        QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::DONUT);
         model.ChooseChart(kPaymentDocument, kMonthlyTable, std::nullopt);
         QVERIFY(!model.GetChosenChart(kPaymentDocument, kMonthlyTable).has_value());
         QCOMPARE(model.GetChartType(kPaymentDocument, kMonthlyTable), EChartType::LINE);
         QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::LINE);
+
+        // 몫 표(결제 수단별 비중)는 도넛을 추천하고, 막대를 고르면 막대로 그리고 되돌리면 다시 도넛이다
+        QCOMPARE(model.GetRecommendedChart(kPaymentDocument, kShareTable), EChartType::DONUT);
+        QCOMPARE(model.BuildChart(kPaymentDocument, kShareTable).eType, EChartType::DONUT);
+        model.ChooseChart(kPaymentDocument, kShareTable, EChartType::BAR);
+        QCOMPARE(model.BuildChart(kPaymentDocument, kShareTable).eType, EChartType::BAR);
+        model.ChooseChart(kPaymentDocument, kShareTable, std::nullopt);
+        QCOMPARE(model.BuildChart(kPaymentDocument, kShareTable).eType, EChartType::DONUT);
 
         // 그리지 않는 표는 다른 종류를 골라도 NONE 이고 까닭을 남긴다
         QCOMPARE(model.GetRecommendedChart(kPaymentDocument, kPriorityTable), EChartType::NONE);

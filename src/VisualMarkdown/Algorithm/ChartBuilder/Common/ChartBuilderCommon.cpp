@@ -23,6 +23,8 @@ constexpr double kCategoryHalfWidth = 0.5;        // 범주 축은 -0.5 부터 �
 constexpr int kRightAxis = 1;
 constexpr int kMaxYAxes = 2;                      // 왼쪽 · 오른쪽
 
+constexpr int kMinShareRows = 2;                  // 몫 표: 행 2–kMaxShareSlices 개(design/MoreViews.md §5.2)
+
 // 칸 글(앞뒤 공백을 뺀다). 칸이 모자란 행은 빈 칸으로 본다
 QString GetCell(const KnowledgeTable& table, int row, int column)
 {
@@ -252,6 +254,26 @@ QStringList ListSeriesGroups(const KnowledgeTable& table, const ChartColumns& co
 int CountSeries(const KnowledgeTable& table, const ChartColumns& columns)
 {
     return columns.vecY.size() * ListSeriesGroups(table, columns).size();
+}
+
+bool IsShareTable(const KnowledgeTable& table, const ChartColumns& columns)
+{
+    if (columns.iSeries >= 0 || columns.vecY.size() != 1)
+        return false;
+    const int iY = columns.vecY.first();
+    if (!ChartShare::IsPercentUnit(table.vecColumns[iY].strUnit))
+        return false;
+    if (table.vecRows.size() < kMinShareRows || table.vecRows.size() > kMaxShareSlices)
+        return false;
+    double dSum = 0;
+    for (int iRow = 0; iRow < table.vecRows.size(); ++iRow)
+    {
+        const std::optional<double> optValue = ParseQuantity(GetCell(table, iRow, iY));
+        if (!optValue || *optValue < 0)
+            return false;
+        dSum += *optValue;
+    }
+    return ChartShare::IsWholePercent(dSum);
 }
 
 QString MakeSeriesName(const KnowledgeTable& table, const ChartColumns& columns, int yColumn, const QString& group)

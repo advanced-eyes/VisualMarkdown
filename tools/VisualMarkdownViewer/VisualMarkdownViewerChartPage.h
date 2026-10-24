@@ -14,7 +14,7 @@ class QLabel;
 class QTableWidget;
 
 // 지식 안 표 하나의 쪽: 위는 차트(KnowledgeChartView), 아래는 원래 표(읽기 전용, 머리 줄은 열 이름과 단위).
-// 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵. 고르면 ChartTypeChosen 을 낸다(차트는 쓰는 쪽이 다시 만들어 넣는다).
+// 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛. 고르면 ChartTypeChosen 을 낸다(차트는 쓰는 쪽이 다시 만들어 넣는다).
 // 차트로 그리지 않는 표(NONE)는 차트 대신 그 까닭을 한 줄로 보이고 표를 크게 보인다(design/Views.md §6 규칙 1).
 // 창과 스냅샷이 같은 쪽을 쓴다.
 class VisualMarkdownViewerChartPage : public QWidget

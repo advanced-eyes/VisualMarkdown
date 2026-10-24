@@ -32,7 +32,7 @@ const QStringList kTableTitles {
     QStringLiteral("2단계 검출기의 VOC 2007 정확도"),                   // 8 막대
     QStringLiteral("학습 · 시험 시간"),                                // 9 나란한 막대, 축 둘, 빈 값
     QStringLiteral("월별 응답 시간"),                                  // 10 선 둘, 빈 값에서 끊긴다
-    QStringLiteral("결제 수단별 비중"),                                // 11 막대
+    QStringLiteral("결제 수단별 비중"),                                // 11 도넛(조각 4)
     QStringLiteral("동시 사용자와 응답 시간"),                          // 12 산점도
     QStringLiteral("기능 우선순위"),                                   // 13 그리지 않는다
 };
@@ -43,6 +43,7 @@ constexpr int kVocDetectorsChart = 3;
 constexpr int kHeatmapChart = 6;
 constexpr int kTrainTestChart = 8;
 constexpr int kMonthlyChart = 9;
+constexpr int kPaymentChart = 10;
 constexpr int kPriorityChart = 12;
 
 // 알려진 표시: 검출기별 VOC 2007 정확도의 YOLO 막대(넷째 범주, 63.4 %)
@@ -82,6 +83,31 @@ constexpr const char* kLongScaleName = "이미지 한 장을 처리하는 데 �
 constexpr const char* kLongScaleUnit = "ms";
 constexpr double kLongScaleLow = 10;
 constexpr double kLongScaleHigh = 30;
+
+// 도넛(결제 수단별 비중, design/MoreViews.md §5.3): 조각마다 마우스 올림 설명 "범주: 값 단위". 단위가 % 이고 합이 100 이라 값이 곧 몫이어서
+// "(전체의 n%)" 는 쓰지 않는다. 계좌이체(5.3 %, 19.08°)는 20° 아래라 조각 글이 없다
+const QStringList kPaymentTips { QStringLiteral("신용카드: 61.5%"), QStringLiteral("체크카드: 18%"), QStringLiteral("간편결제 (카드 | 계좌): 15.2%"),
+                                 QStringLiteral("계좌이체: 5.3%") };
+constexpr const char* kShareWord = "전체의";   // 설명의 몫 앞 글
+constexpr double kMaxRingDiameter = 480;      // 고리 바깥 지름의 위 한계
+const QSize kTallSize(1600, 1400);            // 고리가 위 한계에 닿은 채 위젯만 높아진다
+const QSize kShortSize(1600, 400);            // 그림 칸이 고리 위 한계보다 낮다
+constexpr double kLegendCenterTolerance = 1;  // 범례 목록 가운데 높이와 고리 가운데 높이의 차(정수 화소에 맞춘 만큼)
+constexpr double kDonutInnerRatio = 0.6;      // 안쪽 반지름 = 바깥 반지름 × 0.6
+constexpr double kFullTurn = 360;
+constexpr double kHalfTurn = 180;
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kMinShareLabelAngle = 20;    // 조각 글은 20° 이상인 조각에만
+constexpr double kAngleTolerance = 0.01;      // 조각 가운데 각(도)의 여유
+constexpr double kRadiusTolerance = 0.01;     // 조각 가운데 반지름(px)의 여유
+constexpr double kEdgeAngle = 3;              // 조각 양 끝에서 이만큼(도) 안쪽은 조각 색이다
+constexpr double kOuterBandRatio = 0.3;       // 조각 색을 보는 자리: 띠 가운데에서 바깥쪽으로 띠 너비의 이만큼(조각 글과 겹치지 않게)
+constexpr double kHoleProbeRatio = 0.7;       // 가운데 글을 찾는 상자: 안쪽 반지름의 이만큼 둘레
+constexpr int kLabelProbeWidth = 40;          // 조각 글을 찾는 상자(조각 가운데 점 둘레)
+constexpr int kLabelProbeHeight = 20;
+constexpr double kOutsideRing = 3;            // 고리 밖으로 이만큼(px) 나간 자리
+constexpr int kEqualSlices = 8;               // 계열 색 8개가 모두 나오는 같은 크기 조각(45°)
+const QSize kNarrowDonutSize(200, 300);       // 범례 목록 옆 고리가 60px 보다 작아지는 좁은 위젯
 
 constexpr const char* kPriorityWord = "우선순위";   // NONE 의 까닭(경고)에 나오는 열 이름
 const QSize kSmallSize(420, 300);
@@ -241,9 +267,92 @@ QPair<int, int> FindColorColumns(const QImage& image, const QRect& rect, const Q
     }
     return pairColumns;
 }
+
+// 도넛 합성 설정: 범주 항목 1 · 항목 2 …, 값(비었으면 값 없음), 단위. 축은 하나(0 – 0 보다 큰 값의 합)
+ChartSpec MakeSyntheticDonut(const QVector<std::optional<double>>& values, const QString& unit = QStringLiteral("%"))
+{
+    ChartSpec spec;
+    spec.eType = EChartType::DONUT;
+    spec.strTitle = QStringLiteral("합성 도넛");
+    spec.strCaption = QStringLiteral("조각 시험");
+    spec.xAxis.strTitle = QStringLiteral("항목");
+    ChartSeries series;
+    series.strName = QStringLiteral("몫");
+    series.strUnit = unit;
+    double dTotal = 0;
+    for (int iPoint = 0; iPoint < values.size(); ++iPoint)
+    {
+        const QString strLabel = QStringLiteral("항목 %1").arg(iPoint + 1);
+        spec.xAxis.vecCategories << strLabel;
+        ChartPoint point;
+        point.dX = iPoint;
+        point.optY = values[iPoint];
+        point.strLabel = strLabel;
+        series.vecPoints << point;
+        if (values[iPoint] && std::isfinite(*values[iPoint]) && *values[iPoint] > 0)
+            dTotal += *values[iPoint];
+    }
+    spec.xAxis.dMin = -kCategoryHalfWidth;
+    spec.xAxis.dMax = std::max(1, static_cast<int>(values.size())) - kCategoryHalfWidth;
+    ChartAxis axis;
+    axis.strTitle = series.strName;
+    axis.strUnit = unit;
+    axis.dMax = dTotal;
+    spec.vecYAxes << axis;
+    spec.vecSeries << series;
+    return spec;
 }
 
-// 차트 위젯(KnowledgeChartView, design/Views.md §6 · §7 · design/MoreViews.md §4.3)을 showcase 표 13개의 차트 설정으로 시험한다(offscreen).
+// center 에서 본 point 의 각: 12시가 0, 시계 방향으로 는다(0 … 360)
+double GetClockAngle(const QPointF& center, const QPointF& point)
+{
+    const double dAngle = std::atan2(point.x() - center.x(), center.y() - point.y()) * kHalfTurn / kPi;
+    return dAngle < 0 ? dAngle + kFullTurn : dAngle;
+}
+
+// center 에서 radius 만큼, 12시에서 시계 방향으로 angle(도) 돈 자리
+QPointF MapClockPoint(const QPointF& center, double radius, double angle)
+{
+    const double dRadians = angle * kPi / kHalfTurn;
+    return QPointF(center.x() + radius * std::sin(dRadians), center.y() - radius * std::cos(dRadians));
+}
+
+// 조각 글을 찾는 상자: 조각 가운데 점 둘레
+QRect MakeLabelProbe(const QRectF& mark)
+{
+    return QRect(mark.center().toPoint() - QPoint(kLabelProbeWidth / 2, kLabelProbeHeight / 2), QSize(kLabelProbeWidth, kLabelProbeHeight));
+}
+
+// 채움 위 글자가 있는지: rect 안에 채움 색보다 글자 색에 가까운 점이 있다(안티앨리어싱된 글자도 획 가운데는 글자 색 쪽이다.
+// 곡선뿐인 글자("60%")는 글자 색과 똑같은 점이 없을 수 있어 색이 같은지로는 보지 않는다)
+bool HasTextOn(const QImage& image, const QRect& rect, const QColor& fill, const QColor& text)
+{
+    const QRect rectInside = rect.intersected(image.rect());
+    for (int iY = rectInside.top(); iY <= rectInside.bottom(); ++iY)
+    {
+        for (int iX = rectInside.left(); iX <= rectInside.right(); ++iX)
+        {
+            const QColor pixel = image.pixelColor(iX, iY);
+            if (ViewTestSupport::GetColorDistance(pixel, text) < ViewTestSupport::GetColorDistance(pixel, fill))
+                return true;
+        }
+    }
+    return false;
+}
+
+// rect 안이 모두 그 색인지(조각 글이 없는 조각)
+bool IsFilledWith(const QImage& image, const QRect& rect, const QColor& color)
+{
+    const QRect rectInside = rect.intersected(image.rect());
+    for (int iY = rectInside.top(); iY <= rectInside.bottom(); ++iY)
+        for (int iX = rectInside.left(); iX <= rectInside.right(); ++iX)
+            if (image.pixelColor(iX, iY) != color)
+                return false;
+    return !rectInside.isEmpty();
+}
+}
+
+// 차트 위젯(KnowledgeChartView, design/Views.md §6 · §7 · design/MoreViews.md §4.3 · §5.3)을 showcase 표 13개의 차트 설정으로 시험한다(offscreen).
 class KnowledgeChartViewTest : public QObject
 {
     Q_OBJECT
@@ -302,15 +411,17 @@ private slots:
         // 값이 있는 점은 모두 그림 칸 안에 표시가 있고, 그 표시 가운데에서 그 점을 찾는다
         const QRectF rectPlot = view.GetPlotRect();
         QVERIFY(!rectPlot.isEmpty());
+        const bool bDonut = spec.eType == EChartType::DONUT;
         for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
         {
             for (int iPoint = 0; iPoint < spec.vecSeries[iSeries].vecPoints.size(); ++iPoint)
             {
+                const ChartPoint& point = spec.vecSeries[iSeries].vecPoints[iPoint];
                 const QRectF rectMark = view.GetMarkRect(iSeries, iPoint);
-                const QString strWhat = spec.vecSeries[iSeries].strName + QLatin1Char('/') + spec.vecSeries[iSeries].vecPoints[iPoint].strLabel
-                                        + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectMark);
-                // 값이 없는 점은 표시가 없다(히트맵은 빈 칸을 테두리와 "—" 로 그려 칸이 있다)
-                if (!spec.vecSeries[iSeries].vecPoints[iPoint].optY && spec.eType != EChartType::HEATMAP)
+                const QString strWhat = spec.vecSeries[iSeries].strName + QLatin1Char('/') + point.strLabel + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectMark);
+                // 값이 없는 점은 표시가 없다(히트맵은 빈 칸을 테두리와 "—" 로 그려 칸이 있다). 도넛은 0 보다 큰 값만 조각이 보인다
+                const bool bMarked = bDonut ? point.optY && *point.optY > 0 : point.optY || spec.eType == EChartType::HEATMAP;
+                if (!bMarked)
                 {
                     QVERIFY2(rectMark.isEmpty(), qUtf8Printable(strWhat));
                     continue;
@@ -319,7 +430,9 @@ private slots:
                 QVERIFY2(rectPlot.adjusted(-kMarkSlack, -kMarkSlack, kMarkSlack, kMarkSlack).contains(rectMark.center()),
                          qUtf8Printable(strWhat + ViewTestSupport::DescribeRect(rectPlot)));
                 QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(iSeries, iPoint));
-                QVERIFY2(view.GetToolTipAt(rectMark.center().toPoint()).contains(spec.vecSeries[iSeries].strName), qUtf8Printable(strWhat));
+                // 설명에는 계열 이름이 나온다. 도넛은 조각(범주)이 이름이다
+                const QString strName = bDonut ? point.strLabel : spec.vecSeries[iSeries].strName;
+                QVERIFY2(view.GetToolTipAt(rectMark.center().toPoint()).contains(strName), qUtf8Printable(strWhat));
             }
         }
     }
@@ -532,7 +645,7 @@ private slots:
         }
     }
 
-    // 범례: 계열이 둘 이상이면 있고, 하나뿐이면 없다(히트맵의 색 범례는 heatmapDrawsCells 가 본다)
+    // 범례: 계열이 둘 이상이면 있고, 하나뿐이면 없다(히트맵의 색 범례는 heatmapDrawsCells, 도넛의 범례 목록은 donutDrawsSlices 가 본다)
     void legendOnlyForSeveralSeries()
     {
         KnowledgeChartView view;
@@ -540,7 +653,7 @@ private slots:
         for (const ChartSpec& spec : m_vecSpecs)
         {
             view.SetSpec(spec);
-            if (spec.eType == EChartType::NONE || spec.eType == EChartType::STEP_BAR || spec.eType == EChartType::HEATMAP)
+            if (spec.eType == EChartType::NONE || spec.eType == EChartType::STEP_BAR || spec.eType == EChartType::HEATMAP || spec.eType == EChartType::DONUT)
                 continue;
             const bool bLegend = !view.GetLegendRect().isEmpty();
             QVERIFY2(bLegend == (spec.vecSeries.size() > 1), qUtf8Printable(spec.strTitle));
@@ -582,7 +695,7 @@ private slots:
         const double dInfinity = std::numeric_limits<double>::infinity();
         const double dNaN = std::numeric_limits<double>::quiet_NaN();
         const double dHuge = std::numeric_limits<double>::max();
-        for (const EChartType eType : { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP })
+        for (const EChartType eType : { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP, EChartType::DONUT })
         {
             const QString strType = GetTypeName(eType);
             QTest::newRow(qPrintable(strType + " zero width")) << static_cast<int>(eType) << 5.0 << 5.0 << 5.0;
@@ -607,10 +720,11 @@ private slots:
         view.SetSpec(spec);
         const QImage image = ViewTestSupport::Render(view);
         QVERIFY(ViewTestSupport::HasEnoughInk(image, VisualMarkdownTheme::MakeLight().background));
-        // 히트맵은 숫자가 아닌 값을 빈 칸으로 본다: 모든 칸이 비면 그림 칸 대신 "그릴 값이 없다" 다
-        const bool bNoHeatmapValue = static_cast<EChartType>(type) == EChartType::HEATMAP && !std::isfinite(value);
-        QCOMPARE(view.GetPlotRect().isEmpty(), bNoHeatmapValue);
-        QCOMPARE(view.GetMessageText().isEmpty(), !bNoHeatmapValue);
+        // 히트맵은 숫자가 아닌 값을 빈 칸으로 본다: 모든 칸이 비면 그림 칸 대신 "그릴 값이 없다" 다. 도넛은 0 보다 큰 유한한 값이 없으면 그렇다
+        const EChartType eType = static_cast<EChartType>(type);
+        const bool bNoValue = (eType == EChartType::HEATMAP && !std::isfinite(value)) || (eType == EChartType::DONUT && !(std::isfinite(value) && value > 0));
+        QCOMPARE(view.GetPlotRect().isEmpty(), bNoValue);
+        QCOMPARE(view.GetMessageText().isEmpty(), !bNoValue);
         for (int iPoint = 0; iPoint < spec.vecSeries[0].vecPoints.size(); ++iPoint)
         {
             const QRectF rectMark = view.GetMarkRect(0, iPoint);
@@ -809,13 +923,16 @@ private slots:
         QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend, theme.GetRampColor(1)));
     }
 
-    // 히트맵의 색(크기 눈금 · 채움 위 글자)은 다른 차트에 쓰이지 않는다: 그 값을 바꿔도 막대 · 단계 막대 · 선 · 산점도 · 그리지 않는 표는 같은 그림이다
+    // 히트맵의 색(크기 눈금 · 채움 위 글자)은 다른 차트에 쓰이지 않는다: 그 값을 바꿔도 막대 · 단계 막대 · 선 · 산점도 · 그리지 않는 표는 같은 그림이다.
+    // 도넛은 조각 글에 채움 위 글자를 쓰고(바꾸면 그림이 바뀐다) 크기 눈금은 쓰지 않는다
     void otherChartsIgnoreHeatmapColors()
     {
         VisualMarkdownTheme changed = VisualMarkdownTheme::MakeLight();
         changed.vecSequentialRamp = { QColor(Qt::red), QColor(Qt::green) };
         changed.fillTextDark = QColor(Qt::magenta);
         changed.fillTextLight = QColor(Qt::cyan);
+        VisualMarkdownTheme changedRamp = VisualMarkdownTheme::MakeLight();
+        changedRamp.vecSequentialRamp = changed.vecSequentialRamp;
         KnowledgeChartView view;
         view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
         for (const ChartSpec& spec : m_vecSpecs)
@@ -825,6 +942,14 @@ private slots:
             view.SetSpec(spec);
             view.SetTheme(VisualMarkdownTheme::MakeLight());
             const QImage image = ViewTestSupport::Render(view);
+            if (spec.eType == EChartType::DONUT)
+            {
+                view.SetTheme(changedRamp);
+                QVERIFY2(ViewTestSupport::Render(view) == image, qUtf8Printable(spec.strTitle));
+                view.SetTheme(changed);
+                QVERIFY2(ViewTestSupport::Render(view) != image, qUtf8Printable(spec.strTitle));
+                continue;
+            }
             view.SetTheme(changed);
             QVERIFY2(ViewTestSupport::Render(view) == image, qUtf8Printable(spec.strTitle));
         }
@@ -974,6 +1099,362 @@ private slots:
         view.GetToolTipAt(QPoint(20, 15));
     }
 
+    // 도넛(결제 수단별 비중, design/MoreViews.md §5.3): 왼쪽에 고리(그림 칸은 고리를 담는 정사각형, 안쪽 반지름은 바깥의 60 %), 오른쪽에 범례 목록.
+    // 조각은 12시에서 시계 방향 · 행 순서이고 각은 값 / 전체 × 360°, 조각 사이는 2px 바탕 틈, 색은 조각 자리의 계열 색이다.
+    // 조각 글(몫)은 20° 이상인 조각에만 채움과 대비가 큰 글자 색(4.5:1 이상)으로 쓴다. 가운데에 y 열 이름과 합.
+    // 표시 가운데(고리 띠 가운데 반지름 · 가운데 각)에서 그 조각을 찾고, 설명은 "범주: 값 단위" 다(단위 % · 합 100 이라 값이 곧 몫이어서 몫은 쓰지 않는다)
+    void donutDrawsSlices_data()
+    {
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+    void donutDrawsSlices()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = dark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+        const ChartSpec& spec = m_vecSpecs[kPaymentChart];
+        QCOMPARE(spec.eType, EChartType::DONUT);
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::HasEnoughInk(image, theme.background));
+        QCOMPARE(ViewTestSupport::Render(view), image);
+        QCOMPARE(view.GetMessageText(), QString());
+
+        const QRectF rectPlot = view.GetPlotRect();
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectPlot.isEmpty());
+        QVERIFY(!rectLegend.isEmpty());
+        QCOMPARE(rectPlot.width(), rectPlot.height());
+        QVERIFY2(QRectF(view.rect()).contains(rectPlot) && QRectF(view.rect()).contains(rectLegend),
+                 qUtf8Printable(ViewTestSupport::DescribeRect(rectPlot) + ViewTestSupport::DescribeRect(rectLegend)));
+        QVERIFY2(rectLegend.left() >= rectPlot.right() && rectLegend.top() >= rectPlot.top() && rectLegend.bottom() <= rectPlot.bottom(),
+                 qUtf8Printable(ViewTestSupport::DescribeRect(rectPlot) + ViewTestSupport::DescribeRect(rectLegend)));
+
+        const QPointF ptCenter = rectPlot.center();
+        const double dOuter = rectPlot.width() / 2;
+        const double dInner = dOuter * kDonutInnerRatio;
+        const double dMiddle = (dInner + dOuter) / 2;
+        const ChartSeries& series = spec.vecSeries[0];
+        double dTotal = 0;
+        for (const ChartPoint& point : series.vecPoints)
+            dTotal += *point.optY;
+        QCOMPARE(series.vecPoints.size(), kPaymentTips.size());
+        double dStart = 0;
+        for (int iPoint = 0; iPoint < series.vecPoints.size(); ++iPoint)
+        {
+            const double dSweep = *series.vecPoints[iPoint].optY / dTotal * kFullTurn;
+            const QColor color = theme.GetSeriesColor(iPoint);
+            const QRectF rectMark = view.GetMarkRect(0, iPoint);
+            const QString strWhat = series.vecPoints[iPoint].strLabel + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectMark);
+            QVERIFY2(!rectMark.isEmpty(), qUtf8Printable(strWhat));
+
+            // 표시 가운데: 고리 띠 가운데 반지름, 조각 가운데 각(각이 값에 비례한다)
+            const double dAngle = GetClockAngle(ptCenter, rectMark.center());
+            QVERIFY2(std::abs(dAngle - (dStart + dSweep / 2)) < kAngleTolerance, qUtf8Printable(strWhat + QStringLiteral(" %1° / %2°").arg(dAngle).arg(dStart + dSweep / 2)));
+            QVERIFY2(std::abs(QLineF(ptCenter, rectMark.center()).length() - dMiddle) < kRadiusTolerance, qUtf8Printable(strWhat));
+            QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(0, iPoint));
+            QCOMPARE(view.GetToolTipAt(rectMark.center().toPoint()), kPaymentTips[iPoint]);
+
+            // 조각 색: 양 끝 안쪽은 그 자리 계열 색, 시작 각(앞 조각과의 경계)은 바탕 쪽이다(2px 틈)
+            for (const double dEdge : { dStart + kEdgeAngle, dStart + dSweep - kEdgeAngle })
+            {
+                const QPoint ptInside = MapClockPoint(ptCenter, dMiddle + (dOuter - dInner) * kOuterBandRatio, dEdge).toPoint();
+                QVERIFY2(image.pixelColor(ptInside) == color, qUtf8Printable(strWhat + QStringLiteral(" %1° ").arg(dEdge) + image.pixelColor(ptInside).name()));
+            }
+            const QColor gap = image.pixelColor(MapClockPoint(ptCenter, dMiddle, dStart).toPoint());
+            const QColor previous = theme.GetSeriesColor(iPoint == 0 ? series.vecPoints.size() - 1 : iPoint - 1);
+            QVERIFY2(ViewTestSupport::GetColorDistance(gap, theme.background) < ViewTestSupport::GetColorDistance(gap, color)
+                         && ViewTestSupport::GetColorDistance(gap, theme.background) < ViewTestSupport::GetColorDistance(gap, previous),
+                     qUtf8Printable(strWhat + QStringLiteral(" gap ") + gap.name()));
+
+            // 조각 글: 20° 이상인 조각(계좌이체 19.08° 빼고)만, 채움과 대비가 큰 글자 색. 글이 없는 조각의 가운데는 조각 색뿐이다
+            const QColor textColor = theme.GetFillTextColor(color);
+            QVERIFY2(ViewTestSupport::GetContrast(textColor, color) >= kMinFillTextContrast, qUtf8Printable(strWhat + color.name()));
+            if (dSweep >= kMinShareLabelAngle)
+                QVERIFY2(HasTextOn(image, MakeLabelProbe(rectMark), color, textColor), qUtf8Printable(strWhat));
+            else
+                QVERIFY2(IsFilledWith(image, MakeLabelProbe(rectMark), color), qUtf8Printable(strWhat));
+            dStart += dSweep;
+        }
+        QVERIFY(std::abs(dStart - kFullTurn) < kAngleTolerance);
+
+        // 범례 목록: 조각마다 견본(계열 색)
+        for (int iPoint = 0; iPoint < series.vecPoints.size(); ++iPoint)
+            QVERIFY2(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetSeriesColor(iPoint)), qUtf8Printable(theme.GetSeriesColor(iPoint).name()));
+        // 가운데: y 열 이름(흐린 글자)과 그 아래 합(글자 색)
+        const double dHole = dInner * kHoleProbeRatio;
+        const QRect rectHole = QRectF(ptCenter - QPointF(dHole, dHole), QSizeF(2 * dHole, 2 * dHole)).toAlignedRect();
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectHole, theme.mutedText));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectHole, theme.text));
+
+        // 구멍 · 고리 밖 · 범례에서는 조각을 찾지 않는다. 다른 계열 · 없는 점은 표시가 없다
+        for (const QPoint& ptOutside : { ptCenter.toPoint(), MapClockPoint(ptCenter, dOuter + kOutsideRing, kFullTurn / 8).toPoint(),
+                                         MapClockPoint(ptCenter, dInner - kOutsideRing, kFullTurn / 8).toPoint(), rectLegend.center().toPoint() })
+        {
+            QCOMPARE(view.FindPointAt(ptOutside), qMakePair(-1, -1));
+            QCOMPARE(view.GetToolTipAt(ptOutside), QString());
+        }
+        QVERIFY(view.GetMarkRect(1, 0).isEmpty());
+        QVERIFY(view.GetMarkRect(0, -1).isEmpty());
+        QVERIFY(view.GetMarkRect(0, series.vecPoints.size()).isEmpty());
+    }
+
+    // 고리 바깥 지름은 그림 칸에 맞추되 480px 를 넘지 않고, 고리는 그림 칸 위에 붙는다(위젯이 높아져도 고리 자리가 그대로다).
+    // 범례 목록은 고리 오른쪽, 고리 가운데 높이다. 그림 칸이 480px 보다 낮으면 고리는 그 높이에 맞추고 위 끝은 그대로다
+    void donutRingIsCappedAndTopAttached()
+    {
+        KnowledgeChartView view;
+        view.SetSpec(m_vecSpecs[kPaymentChart]);
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        const QRectF rectPlot = view.GetPlotRect();
+        QCOMPARE(rectPlot.width(), kMaxRingDiameter);
+        QCOMPARE(rectPlot.height(), kMaxRingDiameter);
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY2(rectLegend.left() >= rectPlot.right(), qUtf8Printable(ViewTestSupport::DescribeRect(rectPlot) + ViewTestSupport::DescribeRect(rectLegend)));
+        QVERIFY2(std::abs(rectLegend.center().y() - rectPlot.center().y()) <= kLegendCenterTolerance,
+                 qUtf8Printable(ViewTestSupport::DescribeRect(rectPlot) + ViewTestSupport::DescribeRect(rectLegend)));
+
+        view.resize(kTallSize);
+        QCOMPARE(view.GetPlotRect(), rectPlot);
+
+        view.resize(kShortSize);
+        const QRectF rectShort = view.GetPlotRect();
+        QVERIFY2(rectShort.height() < kMaxRingDiameter && rectShort.width() == rectShort.height(), qUtf8Printable(ViewTestSupport::DescribeRect(rectShort)));
+        QCOMPARE(rectShort.topLeft(), rectPlot.topLeft());
+        QVERIFY(QRectF(view.rect()).contains(rectShort));
+        QVERIFY(QRectF(view.rect()).contains(view.GetLegendRect()));
+    }
+
+    // 값이 곧 몫이면(단위 % · 합 100 ± 1) 범례에 몫 칸(흐린 글자)을 쓰지 않고 설명에 "(전체의 n%)" 를 쓰지 않는다(같은 수가 두 번 나오지 않게).
+    // 다른 단위(명)이거나 합이 100 ± 1 밖인 % 표는 둘 다 쓴다. 조각 글은 그대로다
+    void donutOmitsShareWhenValueIsShare()
+    {
+        struct ShareCase
+        {
+            const char* pName;
+            QVector<std::optional<double>> vecValues;
+            const char* pUnit;
+            const char* pFirstTip;   // 첫 조각의 설명
+            bool bShare;             // 범례에 몫 칸이 있는지
+        };
+        const QVector<ShareCase> vecCases {
+            { "% 합 100", { 60.0, 25.0, 15.0 }, "%", "항목 1: 60%", false },
+            { "% 합 99", { 59.0, 25.0, 15.0 }, "%", "항목 1: 59%", false },
+            { "% 합 101", { 61.0, 25.0, 15.0 }, "%", "항목 1: 61%", false },
+            { "% 합 98.9", { 58.9, 25.0, 15.0 }, "%", "항목 1: 58.9% (전체의 59.6%)", true },
+            { "% 합 120", { 60.0, 40.0, 20.0 }, "%", "항목 1: 60% (전체의 50%)", true },
+            { "명 합 100", { 60.0, 25.0, 15.0 }, "명", "항목 1: 60명 (전체의 60%)", true },
+        };
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        view.SetTheme(theme);
+        for (const ShareCase& shareCase : vecCases)
+        {
+            const QString strCase = QString::fromUtf8(shareCase.pName);
+            view.SetSpec(MakeSyntheticDonut(shareCase.vecValues, QString::fromUtf8(shareCase.pUnit)));
+            const QImage image = ViewTestSupport::Render(view);
+            const QRectF rectMark = view.GetMarkRect(0, 0);
+            QCOMPARE(view.GetToolTipAt(rectMark.center().toPoint()), QString::fromUtf8(shareCase.pFirstTip));
+            for (int iPoint = 1; iPoint < shareCase.vecValues.size(); ++iPoint)
+                QVERIFY2(view.GetToolTipAt(view.GetMarkRect(0, iPoint).center().toPoint()).contains(QString::fromUtf8(kShareWord)) == shareCase.bShare,
+                         qUtf8Printable(strCase));
+            // 몫 칸만 흐린 글자다(그리는 점의 범주 글 · 값은 글자 색)
+            QVERIFY2(ViewTestSupport::HasColorIn(image, view.GetLegendRect().toAlignedRect(), theme.mutedText) == shareCase.bShare, qUtf8Printable(strCase));
+            // 조각 글은 그대로다: 첫 조각(180° 이상)에 몫을 쓴다
+            const QColor fill = theme.GetSeriesColor(0);
+            QVERIFY2(HasTextOn(image, MakeLabelProbe(rectMark), fill, theme.GetFillTextColor(fill)), qUtf8Printable(strCase));
+        }
+    }
+
+    // 조각 글은 20° 이상인 조각에만 쓴다(200° · 120.1° · 20° 는 쓰고 19.9° 는 쓰지 않는다). 계열 색 8개(45° 조각) 위 조각 글은
+    // fillTextDark · fillTextLight 가운데 대비가 큰 쪽이고 4.5:1 이상이다. 설명의 값 · 몫(소수 한 자리까지, 끝의 0 은 뺀다)
+    void donutShareLabels_data()
+    {
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+    void donutShareLabels()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = dark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetTheme(theme);
+        const QVector<double> vecAngles { 200, 120.1, kMinShareLabelAngle, 19.9 };   // 합 360 이라 값이 곧 각이다
+        view.SetSpec(MakeSyntheticDonut({ vecAngles[0], vecAngles[1], vecAngles[2], vecAngles[3] }, QStringLiteral("명")));
+        QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-donut-labels-%1").arg(dark ? "dark" : "light")));
+        for (int iPoint = 0; iPoint < vecAngles.size(); ++iPoint)
+        {
+            const QColor fill = theme.GetSeriesColor(iPoint);
+            const QRect rectProbe = MakeLabelProbe(view.GetMarkRect(0, iPoint));
+            const bool bLabel = iPoint < vecAngles.size() - 1;
+            QVERIFY2(bLabel ? HasTextOn(image, rectProbe, fill, theme.GetFillTextColor(fill)) : IsFilledWith(image, rectProbe, fill),
+                     qUtf8Printable(QStringLiteral("%1°").arg(vecAngles[iPoint])));
+        }
+        QCOMPARE(view.GetToolTipAt(view.GetMarkRect(0, 1).center().toPoint()), QStringLiteral("항목 2: 120.1명 (전체의 33.4%)"));
+        QCOMPARE(view.GetToolTipAt(view.GetMarkRect(0, 2).center().toPoint()), QStringLiteral("항목 3: 20명 (전체의 5.6%)"));
+
+        // 같은 크기 조각 8개: 조각마다 계열 색, 그 위 조각 글은 대비가 큰 쪽 글자 색(4.5:1 이상). 설명의 몫은 12.5%
+        QVector<std::optional<double>> vecEqual;
+        for (int iSlice = 0; iSlice < kEqualSlices; ++iSlice)
+            vecEqual << 1.0;
+        view.SetSpec(MakeSyntheticDonut(vecEqual, QStringLiteral("ms")));
+        image = ViewTestSupport::Render(view);
+        for (int iSlice = 0; iSlice < kEqualSlices; ++iSlice)
+        {
+            const QColor fill = theme.GetSeriesColor(iSlice);
+            const bool bLightText = ViewTestSupport::GetContrast(theme.fillTextLight, fill) > ViewTestSupport::GetContrast(theme.fillTextDark, fill);
+            const QColor textColor = bLightText ? theme.fillTextLight : theme.fillTextDark;
+            QCOMPARE(theme.GetFillTextColor(fill), textColor);
+            QVERIFY2(ViewTestSupport::GetContrast(textColor, fill) >= kMinFillTextContrast, qUtf8Printable(fill.name()));
+            const QRectF rectMark = view.GetMarkRect(0, iSlice);
+            QVERIFY2(HasTextOn(image, MakeLabelProbe(rectMark), fill, textColor), qUtf8Printable(fill.name() + QLatin1Char(' ') + textColor.name()));
+            QCOMPARE(view.GetToolTipAt(rectMark.center().toPoint()), QStringLiteral("항목 %1: 1 ms (전체의 12.5%)").arg(iSlice + 1));
+        }
+        // 셋으로 나눈 몫은 소수 한 자리(33.3 · 66.7)
+        view.SetSpec(MakeSyntheticDonut({ 1.0, 2.0 }, QStringLiteral("명")));
+        QCOMPARE(view.GetToolTipAt(view.GetMarkRect(0, 0).center().toPoint()), QStringLiteral("항목 1: 1명 (전체의 33.3%)"));
+        QCOMPARE(view.GetToolTipAt(view.GetMarkRect(0, 1).center().toPoint()), QStringLiteral("항목 2: 2명 (전체의 66.7%)"));
+    }
+
+    // 조각이 되지 않는 점(값 없음 · 0 보다 작음)도 범례 목록에 남고 견본은 비운다(그 자리 계열 색이 그림에 없다). 0 인 점은 각이 0 이라 고리에 없지만
+    // 범례에는 견본과 함께 남는다. 범례 줄은 점마다 하나로 고르게 쌓인다. 조각은 남은 값으로 나눈다(50 · 30 · 20 → 180° · 108° · 72°)
+    void donutListsEveryPoint()
+    {
+        constexpr int kZeroPoint = 4;   // 0 인 점(각 0): 고리에는 없고 범례에는 견본이 있다
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        const ChartSpec spec = MakeSyntheticDonut({ 50.0, std::nullopt, 30.0, -10.0, 0.0, 20.0 });
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-donut-skipped-light")));
+        const QRectF rectPlot = view.GetPlotRect();
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectPlot.isEmpty() && !rectLegend.isEmpty());
+        QVERIFY(rectLegend.left() >= rectPlot.right());
+
+        const QVector<double> vecMiddles { 90, -1, 180 + 54, -1, -1, 288 + 36 };   // 조각 가운데 각. -1 은 표시가 없는 점
+        for (int iPoint = 0; iPoint < vecMiddles.size(); ++iPoint)
+        {
+            const QRectF rectMark = view.GetMarkRect(0, iPoint);
+            const QColor color = theme.GetSeriesColor(iPoint);
+            if (vecMiddles[iPoint] < 0)
+            {
+                QVERIFY2(rectMark.isEmpty(), qUtf8Printable(QString::number(iPoint)));
+                QVERIFY2(!ViewTestSupport::HasColorIn(image, rectPlot.toAlignedRect(), color), qUtf8Printable(color.name()));
+                // 값 없음 · 0 보다 작은 점은 견본을 비운다. 0 인 점은 견본이 있다
+                QCOMPARE(ViewTestSupport::HasColorIn(image, image.rect(), color), spec.vecSeries[0].vecPoints[iPoint].optY == 0.0);
+                continue;
+            }
+            QVERIFY2(std::abs(GetClockAngle(rectPlot.center(), rectMark.center()) - vecMiddles[iPoint]) < kAngleTolerance, qUtf8Printable(QString::number(iPoint)));
+            QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(0, iPoint));
+            QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), color));
+        }
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetSeriesColor(kZeroPoint)));
+
+        // 범례 줄: 점 수만큼(그리지 않는 점도). 줄은 고르게 쌓인다
+        const auto funcLegendHeight = [&view](int points)
+        {
+            QVector<std::optional<double>> vecValues;
+            for (int iPoint = 0; iPoint < points; ++iPoint)
+                vecValues << 1.0;
+            view.SetSpec(MakeSyntheticDonut(vecValues));
+            return view.GetLegendRect().height();
+        };
+        const double dTwo = funcLegendHeight(2);
+        const double dFour = funcLegendHeight(4);
+        const double dSix = funcLegendHeight(6);
+        QVERIFY(dTwo > 0 && dFour > dTwo);
+        QVERIFY2(std::abs((dSix - dFour) - (dFour - dTwo)) < kPixelTolerance, qUtf8Printable(QStringLiteral("%1 %2 %3").arg(dTwo).arg(dFour).arg(dSix)));
+        QCOMPARE(rectLegend.height(), dSix);
+    }
+
+    // 0 보다 큰 값이 없으면(모두 0 · 값 없음 · 0 보다 작음 · 숫자가 아님) 다른 차트처럼 "그릴 값이 없다" 와 경고를 쓰고 그림 칸 · 범례 · 찾을 조각이 없다
+    void donutWithoutPositiveValuesShowsMessage()
+    {
+        constexpr double kBandMiddleOfDiameter = 0.4;   // 고리 띠 가운데 반지름(안쪽 0.3 · 바깥 0.5 의 가운데) = 지름 × 이 값
+        constexpr double kProbeAngle = 10;              // 한 조각이 고리 전체일 때 띠 가운데에서 보는 아무 각(도)
+        const double dNaN = std::numeric_limits<double>::quiet_NaN();
+        const double dInfinity = std::numeric_limits<double>::infinity();
+        const QVector<QVector<std::optional<double>>> vecCases {
+            { 0.0, 0.0 }, { std::nullopt, std::nullopt }, { -1.0, -2.0 }, { dNaN, dInfinity }, {},
+        };
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        for (const QVector<std::optional<double>>& vecValues : vecCases)
+        {
+            ChartSpec spec = MakeSyntheticDonut(vecValues);
+            spec.vecWarnings << QStringLiteral("합성 경고");
+            view.SetSpec(spec);
+            QVERIFY(ViewTestSupport::HasEnoughInk(ViewTestSupport::Render(view), VisualMarkdownTheme::MakeLight().background));
+            const QString strMessage = view.GetMessageText();
+            QVERIFY2(strMessage.startsWith(QString::fromUtf8(kNoValueTitle)) && strMessage.contains(QStringLiteral("합성 경고")), qUtf8Printable(strMessage));
+            QVERIFY(view.GetPlotRect().isEmpty());
+            QVERIFY(view.GetLegendRect().isEmpty());
+            QVERIFY(view.GetMarkRect(0, 0).isEmpty());
+            QCOMPARE(view.FindPointAt(view.rect().center()), qMakePair(-1, -1));
+            QCOMPARE(view.GetToolTipAt(view.rect().center()), QString());
+        }
+        // 값 하나라도 0 보다 크면 고리를 그린다(한 조각이 고리 전체)
+        view.SetSpec(MakeSyntheticDonut({ 0.0, 5.0 }));
+        QCOMPARE(view.GetMessageText(), QString());
+        QVERIFY(!view.GetPlotRect().isEmpty());
+        const QRectF rectMark = view.GetMarkRect(0, 1);
+        QVERIFY(!rectMark.isEmpty());
+        QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(0, 1));
+        QCOMPARE(view.FindPointAt(MapClockPoint(view.GetPlotRect().center(), view.GetPlotRect().width() * kBandMiddleOfDiameter, kProbeAngle).toPoint()),
+                 qMakePair(0, 1));
+        QVERIFY(view.GetMarkRect(0, 0).isEmpty());
+    }
+
+    // 작은 위젯에서도 죽지 않고 고리 · 범례는 위젯 안이며 표시 가운데에서 그 조각을 찾는다(눈으로 보려고 PNG 를 남긴다).
+    // 범례 목록 옆 고리가 60px 보다 작아지는 좁은 위젯은 범례 목록 없이 고리만 그린다
+    void donutSmallWidget()
+    {
+        const ChartSpec& spec = m_vecSpecs[kPaymentChart];
+        KnowledgeChartView view;
+        view.resize(kSmallSize);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::HasEnoughInk(image, VisualMarkdownTheme::MakeLight().background));
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-donut-small-light")));
+        QVERIFY2(QRectF(view.rect()).contains(view.GetPlotRect()), qUtf8Printable(ViewTestSupport::DescribeRect(view.GetPlotRect())));
+        QVERIFY2(QRectF(view.rect()).contains(view.GetLegendRect()), qUtf8Printable(ViewTestSupport::DescribeRect(view.GetLegendRect())));
+        for (int iPoint = 0; iPoint < spec.vecSeries[0].vecPoints.size(); ++iPoint)
+        {
+            const QRectF rectMark = view.GetMarkRect(0, iPoint);
+            QVERIFY2(!rectMark.isEmpty(), qUtf8Printable(QString::number(iPoint)));
+            QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(0, iPoint));
+        }
+        for (int iY = 0; iY < image.height(); ++iY)
+        {
+            QCOMPARE(image.pixelColor(1, iY), VisualMarkdownTheme::MakeLight().background);
+            QCOMPARE(image.pixelColor(image.width() - 2, iY), VisualMarkdownTheme::MakeLight().background);
+        }
+        view.resize(kNarrowDonutSize);
+        const QImage imageNarrow = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(imageNarrow, QStringLiteral("extra-chart-donut-narrow-light")));
+        QVERIFY(view.GetLegendRect().isEmpty());
+        QVERIFY2(QRectF(view.rect()).contains(view.GetPlotRect()), qUtf8Printable(ViewTestSupport::DescribeRect(view.GetPlotRect())));
+        const QRectF rectNarrowMark = view.GetMarkRect(0, 0);
+        QCOMPARE(view.FindPointAt(rectNarrowMark.center().toPoint()), qMakePair(0, 0));
+        for (int iY = 0; iY < imageNarrow.height(); ++iY)
+            QCOMPARE(imageNarrow.pixelColor(imageNarrow.width() - 2, iY), VisualMarkdownTheme::MakeLight().background);
+        view.resize(40, 30);
+        ViewTestSupport::Render(view);
+        view.FindPointAt(QPoint(20, 15));
+        view.GetToolTipAt(QPoint(20, 15));
+    }
+
 private:
     static QString GetTypeName(EChartType type)
     {
@@ -985,6 +1466,7 @@ private:
         case EChartType::LINE: return QStringLiteral("line");
         case EChartType::SCATTER: return QStringLiteral("scatter");
         case EChartType::HEATMAP: return QStringLiteral("heatmap");
+        case EChartType::DONUT: return QStringLiteral("donut");
         }
         return QStringLiteral("unknown");
     }

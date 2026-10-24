@@ -12,6 +12,9 @@
 // 차트 전략들이 함께 쓰는 것: 열 찾기, 숫자 읽기, 행을 x 에 놓기, 계열 · y 축 만들기, 눈금(design/Views.md §6).
 namespace ChartBuilderCommon
 {
+// 몫 표 · 도넛(design/MoreViews.md §5): 조각이 이보다 많으면 몫을 한눈에 보기 어렵다(추천은 행 2–6개, 그리는 도넛은 넘으면 경고)
+inline constexpr int kMaxShareSlices = 6;
+
 // 차트에 쓰는 열 자리
 struct ChartColumns
 {
@@ -36,7 +39,8 @@ struct ChartScale
     QVector<double> vecTicks;
 };
 
-// y 축을 나누는 법. 막대 · 단계 막대 · 선 · 산점도는 단위마다(규칙 4), 히트맵은 y 열마다(색 눈금, design/MoreViews.md §4.1)
+// y 축을 나누는 법. 막대 · 단계 막대 · 선 · 산점도는 단위마다(규칙 4), 히트맵은 y 열마다(색 눈금, design/MoreViews.md §4.1).
+// 도넛은 y 열마다 만들어 첫 축만 남긴다(규칙 4 경고 없이, §5.1)
 enum class EYAxisGrouping { BY_UNIT, BY_COLUMN };
 
 // IsQuantityText 가 숫자로 보는 칸만 읽는다(천 단위 쉼표 · 부호 · 소수 · 지수). 그 밖 · 빈 칸 · 유한하지 않은 값은 비었다
@@ -59,6 +63,9 @@ QVector<ChartRow> PlaceOnNumbers(const KnowledgeTable& table, const ChartColumns
 QStringList ListSeriesGroups(const KnowledgeTable& table, const ChartColumns& columns);
 // 계열 수: 수치인 y 열 수 × series 값 수(series 열이 없으면 1)
 int CountSeries(const KnowledgeTable& table, const ChartColumns& columns);
+// 몫 표(도넛 추천, design/MoreViews.md §5.2): series 열이 없고 수치인 y 가 하나, 그 단위가 %, 행이 2–kMaxShareSlices 개,
+// 모든 행의 y 칸이 비지 않은 0 이상의 숫자, 합이 100 ± 1(ChartShare). x 열 종류는 보지 않는다(쓰는 쪽이 범주 x 일 때만 부른다)
+bool IsShareTable(const KnowledgeTable& table, const ChartColumns& columns);
 // 계열 이름: series 열이 없으면 y 열 이름, 있으면 그 값(y 가 여럿이면 "<y> · <값>")
 QString MakeSeriesName(const KnowledgeTable& table, const ChartColumns& columns, int yColumn, const QString& group);
 // y 마다(series 열이 있으면 그 값마다) 계열을 만들고 축을 둔다.

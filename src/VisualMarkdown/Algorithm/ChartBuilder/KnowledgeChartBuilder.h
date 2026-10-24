@@ -17,7 +17,8 @@ public:
 
 public:
     // 규칙 1 · 2: 수치인 y 가 없거나 모르는 열이 있으면 NONE. 그 밖에는 x 열 종류로 고른다
-    // (범주 → BAR, 범주 + 계열 넷 이상 → HEATMAP, 순서 + cumulative → STEP_BAR, 순서 → LINE, 수치 → SCATTER).
+    // (범주 → BAR, 범주 + 몫 표 → DONUT, 범주 + 계열 넷 이상 → HEATMAP, 순서 + cumulative → STEP_BAR, 순서 → LINE, 수치 → SCATTER).
+    // 몫 표는 series 열 없이 수치인 y 하나 · 단위 % · 행 2–6 · 모든 값이 0 이상 · 합 100 ± 1 이다(히트맵보다 먼저 본다).
     // 계열 수는 수치인 y 열 수 × series 값(빈 칸이 아닌 것) 수다(series 열이 없으면 × 1)
     static EChartType Recommend(const KnowledgeTable& table);
 

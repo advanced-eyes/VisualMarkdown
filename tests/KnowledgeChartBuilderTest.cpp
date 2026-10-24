@@ -84,8 +84,8 @@ const QVector<ExpectedChart> kCharts {
     // 글자 순서 x 의 선 둘, 빈 값에서 끊긴다
     { kMonthlyTable, EChartType::LINE, { "p50", "p95" }, { "ms", "ms" }, { "0", "0" }, { "ms" }, { "p50 · p95" }, "월", "",
       { "5월", "6월", "7월", "8월", "9월" }, "운영 환경 · 하루 평균 · 3.1절" },
-    // 칸 속 | 와 condition 속 "
-    { kPaymentMethodTable, EChartType::BAR, { "비중" }, { "%" }, { "0" }, { "%" }, { "비중" }, "결제 수단", "",
+    // 단위 % · 합 100 · 4행의 몫 표: 도넛(design/MoreViews.md §5.2). 칸 속 | 와 condition 속 "
+    { kPaymentMethodTable, EChartType::DONUT, { "비중" }, { "%" }, { "0" }, { "%" }, { "비중" }, "결제 수단", "",
       { "신용카드", "체크카드", "간편결제 (카드 | 계좌)", "계좌이체" }, "9월 거래 건수 · \"취소\" 건 빼고 · 2절" },
     // 천 단위 쉼표
     { kLoadTable, EChartType::SCATTER, { "응답 시간" }, { "ms" }, { "0" }, { "ms" }, { "응답 시간" }, "동시 사용자", "명", {},
@@ -179,9 +179,22 @@ constexpr const char* kCocoDetectorsAsBarTitle = "AP · AP50 · AP75 · APS · A
 constexpr int kHeatmapMinSeries = 4;
 // 겹친 칸 경고(§4.1): 행 번호 · x 글 · 계열 이름
 constexpr const char* kDuplicateCellWarning = "%1행: 같은 칸(x \"%2\" · 계열 \"%3\")이 겹쳐 이 행을 뺀다";
-constexpr const char* kThirdUnitWord = "셋째 이후 단위";   // 규칙 4 의 경고(히트맵에는 없다)
+constexpr const char* kThirdUnitWord = "셋째 이후 단위";   // 규칙 4 의 경고(히트맵 · 도넛에는 없다)
 
-const QVector<EChartType> kDrawnTypes { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP };
+// 도넛(결제 수단별 비중, design/MoreViews.md §5 · §7.2): 조각(첫 계열의 점)마다의 값, 축 하나(비중, %, 0–100)
+const QVector<double> kPaymentShares { 61.5, 18.0, 15.2, 5.3 };
+constexpr double kPaymentTotal = 100;
+constexpr const char* kPaymentYName = "비중";
+// 도넛 경고(§5.1): 뺀 계열 · 값 없음 · 0 보다 작음 · 단위 % 인데 합이 100 ± 1 밖 · 조각이 6개 넘음
+constexpr const char* kDonutSeriesWarning = "도넛은 계열 하나만 그린다: \"%1\" 만 그리고 %2 은 뺀다";
+constexpr const char* kDonutEmptyWarning = "%1행: 값이 없어 도넛에 넣지 않는다";
+constexpr const char* kDonutNegativeWarning = "%1행: 0 보다 작아 도넛에 넣지 않는다";
+constexpr const char* kDonutSumWarning = "단위가 % 인데 합이 %1 이다(전체의 몫은 합에 대한 비율로 그린다)";
+constexpr const char* kDonutSliceWarning = "조각이 %1개라 읽기 어렵다(막대가 낫다)";
+constexpr int kDonutMaxSlices = 6;
+
+const QVector<EChartType> kDrawnTypes { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP,
+                                        EChartType::DONUT };
 
 // 규칙 4
 constexpr int kMaxYAxes = 2;               // 왼쪽 · 오른쪽
@@ -213,6 +226,7 @@ QString GetTypeName(EChartType type)
     case EChartType::LINE: return QStringLiteral("LINE");
     case EChartType::SCATTER: return QStringLiteral("SCATTER");
     case EChartType::HEATMAP: return QStringLiteral("HEATMAP");
+    case EChartType::DONUT: return QStringLiteral("DONUT");
     }
     return QStringLiteral("?");
 }
@@ -253,6 +267,15 @@ KnowledgeTable MakeTable(const QVector<KnowledgeColumn>& columns, const QVector<
     table.vecColumns = columns;
     table.vecRows = rows;
     return table;
+}
+
+// 몫 표(합성): x "항목"(범주 항목 1 · 항목 2 …), y "몫"(단위 unit). 칸은 values 그대로(빈 글은 빈 칸)
+KnowledgeTable MakeShareTable(const QStringList& values, const QString& unit = QStringLiteral("%"))
+{
+    QVector<QStringList> vecRows;
+    for (int iRow = 0; iRow < values.size(); ++iRow)
+        vecRows << QStringList { QStringLiteral("항목 %1").arg(iRow + 1), values[iRow] };
+    return MakeTable({ MakeColumn("항목"), MakeColumn("몫", unit) }, vecRows, "항목", { "몫" });
 }
 
 ChartSpec BuildChart(const KnowledgeTable& table, std::optional<EChartType> forced = std::nullopt)
@@ -552,6 +575,38 @@ QStringList CheckHeatmapSpec(const ChartSpec& spec)
     return vecProblems;
 }
 
+// 도넛(design/MoreViews.md §5.1): 계열은 하나까지(첫 계열, 축 0), 점은 범주 x 의 점이다(값 없음 · 0 보다 작은 점도 남는다).
+// y 축은 하나: 0 … 0 보다 큰 값의 합(전체), 눈금 없음
+QStringList CheckDonutSpec(const ChartSpec& spec)
+{
+    QStringList vecProblems = CheckCategoryAxis(spec.xAxis);
+    if (spec.vecSeries.size() > 1)
+        vecProblems << QStringLiteral("도넛에 계열이 %1 개다").arg(spec.vecSeries.size());
+    if (spec.vecYAxes.size() != 1)
+        return vecProblems << QStringLiteral("도넛의 y 축이 %1 개다").arg(spec.vecYAxes.size());
+    double dTotal = 0;
+    for (const ChartSeries& series : spec.vecSeries)
+    {
+        if (series.iAxis != 0)
+            vecProblems << series.strName + QStringLiteral(": 축이 %1 이다").arg(series.iAxis);
+        for (const ChartPoint& point : series.vecPoints)
+        {
+            const QString strPoint = series.strName + QStringLiteral(" / ") + point.strLabel;
+            if (!std::isfinite(point.dX) || (point.optY && !std::isfinite(*point.optY)) || point.dBase != 0)
+                vecProblems << strPoint + QStringLiteral(": 유한하지 않은 값이거나 시작 값이 0 이 아니다");
+            vecProblems << CheckCategoryPoint(strPoint, point, spec.xAxis);
+            if (point.optY && *point.optY > 0)
+                dTotal += *point.optY;
+        }
+    }
+    const ChartAxis& axis = spec.vecYAxes.first();
+    if (!axis.vecTicks.isEmpty())
+        vecProblems << QStringLiteral("도넛 축에 눈금이 있다");
+    if (axis.dMin != 0 || std::fabs(axis.dMax - dTotal) > GetTolerance(dTotal))
+        vecProblems << QStringLiteral("도넛 축 %1–%2 가 0–%3(0 보다 큰 값의 합)이 아니다").arg(FormatNumber(axis.dMin), FormatNumber(axis.dMax), FormatNumber(dTotal));
+    return vecProblems;
+}
+
 // 차트 설정이 앞뒤가 맞는지(종류를 바꿔도 지켜야 하는 것)
 QStringList CheckSpec(const ChartSpec& spec)
 {
@@ -568,6 +623,8 @@ QStringList CheckSpec(const ChartSpec& spec)
     }
     if (spec.eType == EChartType::HEATMAP)
         return CheckHeatmapSpec(spec);
+    if (spec.eType == EChartType::DONUT)
+        return CheckDonutSpec(spec);
     const bool bCategorical = spec.eType != EChartType::SCATTER;
     const bool bBars = spec.eType == EChartType::BAR || spec.eType == EChartType::STEP_BAR;
     if (spec.vecYAxes.isEmpty() || spec.vecYAxes.size() > kMaxYAxes)
@@ -646,7 +703,7 @@ QString DescribeProblems(const QString& what, const QStringList& problems)
 }
 }
 
-// 지식 안 차트 설정(KnowledgeChartBuilder, design/Views.md §6 · design/MoreViews.md §4)을 showcase 표 13개(examples/showcase/README.md §3)와
+// 지식 안 차트 설정(KnowledgeChartBuilder, design/Views.md §6 · design/MoreViews.md §4 · §5)을 showcase 표 13개(examples/showcase/README.md §3)와
 // 작은 합성 표로 시험한다.
 // 표마다의 시작 차트 · 계열 · 축 · 빈 값 · 밑글, 숫자 읽기, 눈금, 종류를 바꿔도 앞뒤가 맞는 설정이 나오는지를 본다.
 class KnowledgeChartBuilderTest : public QObject
@@ -873,7 +930,8 @@ private slots:
     }
 
     // 종류를 정하면(보기 앱에서 사용자가 고르면) 그 종류로 그린다. 계열 · 축 · 밑글은 그대로이고 설정은 앞뒤가 맞는다.
-    // 축은 막대 · 단계 막대 · 선 · 산점도가 단위마다, 히트맵이 y 열마다라 같은 쪽끼리 견준다(다른 쪽은 heatmapScalesFollowYColumns · heatmapTableAsOtherCharts)
+    // 축은 막대 · 단계 막대 · 선 · 산점도가 단위마다, 히트맵이 y 열마다라 같은 쪽끼리 견준다(다른 쪽은 heatmapScalesFollowYColumns · heatmapTableAsOtherCharts).
+    // 도넛은 첫 계열 하나와 그 단위의 축 하나다(나머지는 donutKeepsFirstSeries)
     void forcedTypesStayConsistent()
     {
         for (const ExpectedChart& expected : kCharts)
@@ -887,8 +945,18 @@ private slots:
                 QVERIFY2(spec.eType == eExpectedType, qUtf8Printable(strCase + QStringLiteral(" → ") + GetTypeName(spec.eType)));
                 QCOMPARE(spec.strTitle, DecodeUtf8(expected.pTitle));
                 QCOMPARE(spec.strCaption, DecodeUtf8(expected.pCaption));
-                QCOMPARE(ListSeriesNames(spec), expected.vecSeries);
-                if ((eType == EChartType::HEATMAP) == (expected.eType == EChartType::HEATMAP) || expected.eType == EChartType::NONE)
+                if (eExpectedType == EChartType::DONUT)
+                {
+                    QCOMPARE(ListSeriesNames(spec), expected.vecSeries.mid(0, 1));
+                    QCOMPARE(ListSeriesAxes(spec), QStringList { "0" });
+                    QCOMPARE(ListAxisUnits(spec), expected.vecSeriesUnits.mid(0, 1));
+                }
+                else
+                {
+                    QCOMPARE(ListSeriesNames(spec), expected.vecSeries);
+                }
+                if (eExpectedType != EChartType::DONUT
+                    && ((eType == EChartType::HEATMAP) == (expected.eType == EChartType::HEATMAP) || expected.eType == EChartType::NONE))
                 {
                     QCOMPARE(ListSeriesAxes(spec), expected.vecSeriesAxes);
                     QCOMPARE(ListAxisUnits(spec), expected.vecAxisUnits);
@@ -1147,6 +1215,207 @@ private slots:
         QVERIFY2(HasWarningAbout(spec, QStringLiteral("1e999")), qUtf8Printable(DescribeWarnings(spec)));
         const QStringList vecProblems = CheckSpec(spec);
         QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+    }
+
+    // 도넛(결제 수단별 비중, design/MoreViews.md §7.2): 조각 4(첫 계열의 점, 행 순서), 축 하나(비중, %, 0–100, 눈금 없음), 경고 없음.
+    // 단위가 % 인 막대 표 둘(7행 · 합이 100 이 아니다)은 막대 그대로다
+    void donutShowcaseTable()
+    {
+        const KnowledgeTable& table = GetTable(kPaymentMethodTable);
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(table)), GetTypeName(EChartType::DONUT));
+        const ChartSpec spec = BuildChart(table);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::DONUT));
+        QVERIFY2(spec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(spec)));
+        QCOMPARE(spec.vecSeries.size(), 1);
+        const ChartSeries& series = spec.vecSeries[0];
+        QCOMPARE(series.strName, DecodeUtf8(kPaymentYName));
+        QCOMPARE(series.strUnit, QStringLiteral("%"));
+        QCOMPARE(series.iAxis, 0);
+        QCOMPARE(ListYs(series), FormatNumbers(kPaymentShares));
+        QCOMPARE(ListXs(series), (QStringList { "0", "1", "2", "3" }));
+        QCOMPARE(ListLabels(series), spec.xAxis.vecCategories);
+        QCOMPARE(spec.vecYAxes.size(), 1);
+        const ChartAxis& axis = spec.vecYAxes[0];
+        QCOMPARE(axis.strTitle, DecodeUtf8(kPaymentYName));
+        QCOMPARE(axis.strUnit, QStringLiteral("%"));
+        QCOMPARE(FormatNumber(axis.dMin), FormatNumber(0));
+        QCOMPARE(FormatNumber(axis.dMax), FormatNumber(kPaymentTotal));
+        QVERIFY(axis.vecTicks.isEmpty());
+        const QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(GetTable(kVocDetectorsTable))), GetTypeName(EChartType::BAR));
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(GetTable(kTwoStageVocTable))), GetTypeName(EChartType::BAR));
+    }
+
+    // 추천 경계(§5.2): x 가 범주이고 series 열이 없고 수치인 y 가 하나 · 그 단위가 % · 행 2–6 · 모든 y 칸이 0 이상의 숫자 · 합 100 ± 1 이면 도넛.
+    // 히트맵 규칙보다 먼저 본다. 순서 · 수치 x 는 그대로다
+    void recommendDonutForShares()
+    {
+        struct RecommendCase
+        {
+            const char* pName;
+            KnowledgeTable table;
+            EChartType eType;
+        };
+        KnowledgeTable ordinal = MakeShareTable({ "60", "40" });
+        ordinal.vecOrdered = QStringList { "항목" };
+        const QVector<KnowledgeColumn> vecSeriesColumns { MakeColumn("항목"), MakeColumn("몫", "%"), MakeColumn("구분") };
+        const KnowledgeTable twoGroups = MakeTable(vecSeriesColumns, { { "가", "60", "a" }, { "나", "40", "a" } }, "항목", { "몫" }, "구분");
+        const KnowledgeTable fourGroups = MakeTable(vecSeriesColumns, { { "가", "25", "a" }, { "가", "25", "b" }, { "가", "25", "c" }, { "가", "25", "d" } }, "항목",
+                                                    { "몫" }, "구분");
+        const KnowledgeTable twoY = MakeTable({ MakeColumn("항목"), MakeColumn("몫", "%"), MakeColumn("다른 몫", "%") }, { { "가", "60", "50" }, { "나", "40", "50" } },
+                                              "항목", { "몫", "다른 몫" });
+        const KnowledgeTable droppedY = MakeTable({ MakeColumn("항목"), MakeColumn("몫", "%"), MakeColumn("메모") }, { { "가", "60", "높음" }, { "나", "40", "낮음" } },
+                                                  "항목", { "몫", "메모" });
+        const QVector<RecommendCase> vecCases {
+            { "합 99.0", MakeShareTable({ "40", "30", "29" }), EChartType::DONUT },
+            { "합 101.0", MakeShareTable({ "40", "30", "31" }), EChartType::DONUT },
+            { "합 98.9", MakeShareTable({ "40", "30", "28.9" }), EChartType::BAR },
+            { "합 101.1", MakeShareTable({ "40", "30", "31.1" }), EChartType::BAR },
+            { "행 2", MakeShareTable({ "60", "40" }), EChartType::DONUT },
+            { "행 6", MakeShareTable({ "20", "20", "20", "20", "10", "10" }), EChartType::DONUT },
+            { "행 1", MakeShareTable({ "100" }), EChartType::BAR },
+            { "행 7", MakeShareTable({ "20", "20", "20", "10", "10", "10", "10" }), EChartType::BAR },
+            { "0 인 칸", MakeShareTable({ "100", "0" }), EChartType::DONUT },
+            { "단위 없음", MakeShareTable({ "60", "40" }, QString()), EChartType::BAR },
+            { "단위 명", MakeShareTable({ "60", "40" }, QStringLiteral("명")), EChartType::BAR },
+            { "단위 %p", MakeShareTable({ "60", "40" }, QStringLiteral("%p")), EChartType::BAR },
+            { "빈 칸", MakeShareTable({ "60", "", "40" }), EChartType::BAR },
+            { "0 보다 작은 값", MakeShareTable({ "60", "50", "-10" }), EChartType::BAR },
+            { "series 열(값 둘)", twoGroups, EChartType::BAR },
+            { "series 열(값 넷: 히트맵)", fourGroups, EChartType::HEATMAP },
+            { "y 둘", twoY, EChartType::BAR },
+            { "수치가 아닌 y 를 빼면 하나", droppedY, EChartType::DONUT },
+            { "순서 x", ordinal, EChartType::LINE },
+        };
+        for (const RecommendCase& recommendCase : vecCases)
+            QVERIFY2(KnowledgeChartBuilder::Recommend(recommendCase.table) == recommendCase.eType,
+                     qUtf8Printable(DecodeUtf8(recommendCase.pName) + QStringLiteral(": ") + GetTypeName(KnowledgeChartBuilder::Recommend(recommendCase.table))));
+
+        // 추천된 도넛은 그대로 그리고 경고가 없다(합 99 는 100 ± 1 안이다)
+        const ChartSpec spec = BuildChart(MakeShareTable({ "40", "30", "29" }));
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::DONUT));
+        QVERIFY2(spec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(spec)));
+        const QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+    }
+
+    // 다른 표를 도넛으로 정하면(§5.1): 조각은 첫 계열의 점이고 나머지 계열은 빼며 경고를 단다(뺀 계열 이름은 따옴표로 묶어 쉼표로 잇는다).
+    // 축은 하나(첫 계열의 y 열 이름 · 단위, 0 – 0 보다 큰 값의 합, 눈금 없음)이고 단위 셋째부터의 경고(규칙 4)는 없다. 뺀 계열의 빈 칸에는 경고가 없다
+    void donutKeepsFirstSeries()
+    {
+        const QString strSeriesWarning = DecodeUtf8(kDonutSeriesWarning);
+        const QString strSumWarning = DecodeUtf8(kDonutSumWarning);
+
+        // 계열로 색을 나누는 산점도(series 값 둘): 실시간 4점(16.0 + 26.1 + 52.7 + 63.4 = 158.2 %)
+        const ChartSpec speed = BuildChart(GetTable(kSpeedTable), EChartType::DONUT);
+        QCOMPARE(GetTypeName(speed.eType), GetTypeName(EChartType::DONUT));
+        QCOMPARE(ListSeriesNames(speed), QStringList { "실시간" });
+        QCOMPARE(ListYs(speed.vecSeries[0]), ListExpectedYs(kRealTimePoints));
+        QCOMPARE(ListAxisTitles(speed), QStringList { "mAP" });
+        QCOMPARE(ListAxisUnits(speed), QStringList { "%" });
+        QCOMPARE(FormatNumber(speed.vecYAxes[0].dMax), FormatNumber(16.0 + 26.1 + 52.7 + 63.4));
+        QCOMPARE(speed.vecWarnings, (QStringList { strSeriesWarning.arg(QStringLiteral("실시간"), QStringLiteral("\"실시간 아님\"")),
+                                                   strSumWarning.arg(QStringLiteral("158.2")) }));
+        QStringList vecProblems = CheckSpec(speed);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // 히트맵 표(y 여섯): AP 만 남고 다섯은 뺀다. 10조각이라 조각 수 경고, 합 341.5 % 라 합 경고
+        const ChartSpec coco = BuildChart(GetTable(kCocoDetectorsTable), EChartType::DONUT);
+        QCOMPARE(ListSeriesNames(coco), QStringList { "AP" });
+        QCOMPARE(coco.vecSeries[0].vecPoints.size(), kCocoDetectorValues.size());
+        QCOMPARE(coco.vecWarnings, (QStringList { strSeriesWarning.arg(QStringLiteral("AP"), QStringLiteral("\"AP50\", \"AP75\", \"APS\", \"APM\", \"APL\"")),
+                                                  strSumWarning.arg(QStringLiteral("341.5")), DecodeUtf8(kDonutSliceWarning).arg(kCocoDetectorValues.size()) }));
+        vecProblems = CheckSpec(coco);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // 단위가 다른 y 둘(h · s), 학습 시간의 Faster R-CNN(3행)은 빈 칸: 점은 남고 경고. 단위가 % 가 아니라 합 경고는 없다. 전체는 84 + 9.5
+        const ChartSpec trainTest = BuildChart(GetTable(kTrainTestTimeTable), EChartType::DONUT);
+        QCOMPARE(ListSeriesNames(trainTest), QStringList { "학습 시간" });
+        QCOMPARE(ListYs(trainTest.vecSeries[0]), FormatNumbers(kTrainTimes) << FormatValue(std::nullopt));
+        QCOMPARE(ListAxisTitles(trainTest), QStringList { "학습 시간" });
+        QCOMPARE(ListAxisUnits(trainTest), QStringList { "h" });
+        QCOMPARE(FormatNumber(trainTest.vecYAxes[0].dMax), FormatNumber(kTrainTimes[0] + kTrainTimes[1]));
+        QCOMPARE(trainTest.vecWarnings, (QStringList { strSeriesWarning.arg(QStringLiteral("학습 시간"), QStringLiteral("\"시험 시간\"")),
+                                                       DecodeUtf8(kDonutEmptyWarning).arg(3) }));
+        vecProblems = CheckSpec(trainTest);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // 순서 x 의 선 둘: p50 만. 뺀 p95 의 빈 칸(7월)에는 경고가 없다
+        const ChartSpec monthly = BuildChart(GetTable(kMonthlyTable), EChartType::DONUT);
+        QCOMPARE(ListSeriesNames(monthly), QStringList { "p50" });
+        QCOMPARE(ListYs(monthly.vecSeries[0]), FormatNumbers(kMonthlyP50));
+        QCOMPARE(monthly.vecWarnings, QStringList { strSeriesWarning.arg(QStringLiteral("p50"), QStringLiteral("\"p95\"")) });
+
+        // 단위가 넷(h · s · ms · h): 규칙 4 경고 없이 첫 계열(학습)만
+        const KnowledgeTable units = MakeTable(
+            { MakeColumn("방법"), MakeColumn("학습", "h"), MakeColumn("시험", "s"), MakeColumn("지연", "ms"), MakeColumn("준비", "h") },
+            { { "A", "1", "2", "300", "4" }, { "B", "5", "6", "700", "8" } }, "방법", { "학습", "시험", "지연", "준비" });
+        const ChartSpec unitsSpec = BuildChart(units, EChartType::DONUT);
+        QCOMPARE(ListSeriesNames(unitsSpec), QStringList { "학습" });
+        QCOMPARE(ListAxisUnits(unitsSpec), QStringList { "h" });
+        QVERIFY2(!HasWarningAbout(unitsSpec, DecodeUtf8(kThirdUnitWord)), qUtf8Printable(DescribeWarnings(unitsSpec)));
+        QCOMPARE(unitsSpec.vecWarnings, QStringList { strSeriesWarning.arg(QStringLiteral("학습"), QStringLiteral("\"시험\", \"지연\", \"준비\"")) });
+    }
+
+    // 값이 없거나 0 보다 작은 점은 조각이 되지 않고(점은 남는다) 행마다 경고를 단다. 0 인 점은 조각이다(각 0).
+    // 축 끝(전체)은 0 보다 큰 값의 합이다. 단위가 % 인데 합이 100 ± 1 밖이면, 조각(값이 0 이상인 점)이 6개를 넘으면 경고를 단다
+    void donutWarnsAboutPoints()
+    {
+        const QString strEmpty = DecodeUtf8(kDonutEmptyWarning);
+        const QString strNegative = DecodeUtf8(kDonutNegativeWarning);
+        const QString strSum = DecodeUtf8(kDonutSumWarning);
+        const QString strSlices = DecodeUtf8(kDonutSliceWarning);
+
+        const ChartSpec spec = BuildChart(MakeShareTable({ "10", "", "-5", "0", "30" }), EChartType::DONUT);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::DONUT));
+        QCOMPARE(ListYs(spec.vecSeries[0]), (QStringList { "10", FormatValue(std::nullopt), "-5", "0", "30" }));
+        QCOMPARE(spec.xAxis.vecCategories.size(), 5);
+        QCOMPARE(spec.vecYAxes[0].dMin, 0.0);
+        QCOMPARE(spec.vecYAxes[0].dMax, 40.0);
+        QCOMPARE(spec.vecWarnings, (QStringList { strEmpty.arg(2), strNegative.arg(3), strSum.arg(QStringLiteral("40")) }));
+        QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // 단위가 % 가 아니면 합 경고가 없다
+        const ChartSpec people = BuildChart(MakeShareTable({ "10", "", "-5", "0", "30" }, QStringLiteral("명")), EChartType::DONUT);
+        QCOMPARE(people.vecWarnings, (QStringList { strEmpty.arg(2), strNegative.arg(3) }));
+
+        // 합이 100 ± 1 안(99 · 101)이면 합 경고가 없고, 밖(98.9 · 101.1)이면 있다
+        QVERIFY(BuildChart(MakeShareTable({ "40", "30", "29" }), EChartType::DONUT).vecWarnings.isEmpty());
+        QVERIFY(BuildChart(MakeShareTable({ "40", "30", "31" }), EChartType::DONUT).vecWarnings.isEmpty());
+        QCOMPARE(BuildChart(MakeShareTable({ "40", "30", "28.9" }), EChartType::DONUT).vecWarnings, QStringList { strSum.arg(QStringLiteral("98.9")) });
+        QCOMPARE(BuildChart(MakeShareTable({ "40", "30", "31.1" }), EChartType::DONUT).vecWarnings, QStringList { strSum.arg(QStringLiteral("101.1")) });
+
+        // 조각 수는 값이 0 이상인 점이다: 7행에 빈 칸 하나면 6조각(경고 없음), 8행에 빈 칸 하나면 7조각, 0 인 점도 센다
+        const ChartSpec six = BuildChart(MakeShareTable({ "20", "20", "20", "", "10", "10", "20" }), EChartType::DONUT);
+        QCOMPARE(six.vecWarnings, QStringList { strEmpty.arg(4) });
+        const ChartSpec seven = BuildChart(MakeShareTable({ "20", "20", "10", "", "10", "10", "10", "20" }), EChartType::DONUT);
+        QCOMPARE(seven.vecWarnings, (QStringList { strEmpty.arg(4), strSlices.arg(kDonutMaxSlices + 1) }));
+        const ChartSpec zeros = BuildChart(MakeShareTable({ "50", "50", "0", "0", "0", "0", "0" }), EChartType::DONUT);
+        QCOMPARE(zeros.vecWarnings, QStringList { strSlices.arg(kDonutMaxSlices + 1) });
+
+        // 0 보다 큰 값이 없으면 전체는 0 이다(위젯은 "그릴 값이 없다" 를 쓴다)
+        const ChartSpec nothing = BuildChart(MakeShareTable({ "", "0", "-1" }), EChartType::DONUT);
+        QCOMPARE(GetTypeName(nothing.eType), GetTypeName(EChartType::DONUT));
+        QCOMPARE(nothing.vecYAxes[0].dMax, 0.0);
+        QCOMPARE(nothing.vecWarnings, (QStringList { strEmpty.arg(1), strNegative.arg(3), strSum.arg(QStringLiteral("0")) }));
+        vecProblems = CheckSpec(nothing);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+    }
+
+    // 단위가 % 인 막대 표를 도넛으로 정하면: 검출기별 VOC 2007 정확도(7행, 합 512.7)는 합 · 조각 수 경고, 2단계 노트(3행, 합 202.8)는 합 경고
+    void donutWarnsOnPercentBarTables()
+    {
+        const ChartSpec voc = BuildChart(GetTable(kVocDetectorsTable), EChartType::DONUT);
+        QCOMPARE(GetTypeName(voc.eType), GetTypeName(EChartType::DONUT));
+        QCOMPARE(voc.vecWarnings, (QStringList { DecodeUtf8(kDonutSumWarning).arg(QStringLiteral("512.7")), DecodeUtf8(kDonutSliceWarning).arg(7) }));
+        const ChartSpec twoStage = BuildChart(GetTable(kTwoStageVocTable), EChartType::DONUT);
+        QCOMPARE(twoStage.vecWarnings, QStringList { DecodeUtf8(kDonutSumWarning).arg(QStringLiteral("202.8")) });
+        QCOMPARE(FormatNumber(twoStage.vecYAxes[0].dMax), FormatNumber(66.0 + 66.9 + 69.9));
+        // 몫 표는 정해도 추천과 같다(경고 없음)
+        QVERIFY(BuildChart(GetTable(kPaymentMethodTable), EChartType::DONUT).vecWarnings.isEmpty());
     }
 
     // 산점도 표를 막대로: x 칸 글이 범주가 되고(series 가 있어 같은 글은 한 번), 계열은 그대로, y 축은 0 을 넣는다
