@@ -11,7 +11,7 @@
 namespace
 {
 // ================================================================================================
-// 기대값: design/Views.md §5(보기 6개의 점 · 선) · examples/showcase/README.md §2.1(문서 순서) · §3(표 13개의 시작 차트)
+// 기대값: design/Views.md §5(보기의 점 · 선) · design/MoreViews.md §7.3(이웃) · examples/showcase/README.md §2.1(문서 순서) · §3(표 13개의 시작 차트)
 // ================================================================================================
 constexpr int kNodeCount = 31;
 constexpr int kEdgeCount = 36;
@@ -46,6 +46,7 @@ struct ExpectedView
 };
 const QVector<ExpectedView> kViews {
     { EGraphLayoutType::NETWORK, "관계망", "network", kNodeCount, kEdgeCount },
+    { EGraphLayoutType::EGO, "이웃", "ego", 12, 18 },   // 기본 초점 Faster R-CNN, 깊이 2(design/MoreViews.md §7.3)
     { EGraphLayoutType::LINEAGE, "계보도", "lineage", 8, 5 },
     { EGraphLayoutType::TREE, "분류 트리", "tree", 14, 12 },
     { EGraphLayoutType::TIMELINE, "타임라인", "timeline", 16, -1 },
@@ -54,6 +55,14 @@ const QVector<ExpectedView> kViews {
 };
 constexpr int kLineageLanes = 3;
 constexpr int kTimelineUnplaced = 15;
+
+// 이웃 보기의 초점: 기본 초점 · 나무 글(design/MoreViews.md §6.2 · §7.3)
+constexpr const char* kDefaultFocus = "faster-r-cnn";
+constexpr const char* kDefaultFocusTitle = "이웃 · Faster R-CNN";
+constexpr const char* kYoloId = "yolo";
+constexpr const char* kYoloFocusTitle = "이웃 · YOLO";
+constexpr const char* kEdgelessId = "coco";   // 선 없는 점: 이웃은 그 점 하나
+constexpr int kEgoDepth = 2;
 const QStringList kTimelineLanes { "검출기", "결제 모듈", "그 밖" };
 constexpr int kMatrixCells = 40;
 
@@ -140,7 +149,7 @@ private slots:
             QVERIFY2(vecDropped[0].contains(strPart), qUtf8Printable(vecDropped[0]));
     }
 
-    // 보기 6개: 순서 · 이름 · 파일 이름 열쇠, 점 · 선 수(design/Views.md §5).
+    // 보기 7개: 순서(이웃은 관계망 다음) · 이름 · 파일 이름 열쇠, 점 · 선 수(design/Views.md §5 · design/MoreViews.md §7.3).
     // 배치는 그 보기를 처음 달라고 할 때 계산하고(다른 보기는 그대로 계산 전), 같은 것을 다시 준다
     void viewsMatchDesign()
     {
@@ -368,6 +377,75 @@ private slots:
         for (const LayoutNode& node : model.GetLayout(EGraphLayoutType::BIPARTITE).vecNodes)
             iDocuments += node.bDocument ? 1 : 0;
         QCOMPARE(iDocuments, kDocumentCount - 1);
+    }
+
+    // 이웃 보기의 초점(design/MoreViews.md §6.2): 처음 · 다시 읽은 뒤에는 기본 초점(Faster R-CNN)이고 나무 글은 "이웃 · {초점 이름}" 이다.
+    // 초점을 바꾸면 실제 초점이 바뀔 때만 이웃 배치를 버린다(다른 보기의 배치는 그대로). 없는 id · 빈 id 는 기본 초점이다.
+    // 이웃 배치는 그 초점 · 깊이 2 로 계산하고, 읽지 못하면 초점도 그대로 둔다
+    void egoFocusFollowsModel()
+    {
+        VisualMarkdownViewerModel model;
+        QCOMPARE(model.GetFocusConcept(), QString());   // 읽기 전: 점이 없다
+        QCOMPARE(model.GetViewTitle(EGraphLayoutType::EGO), QStringLiteral("이웃"));
+        QVERIFY(model.Load(ViewerTestSupport::GetShowcaseDir()));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kDefaultFocus));
+        QCOMPARE(model.GetViewTitle(EGraphLayoutType::EGO), DecodeUtf8(kDefaultFocusTitle));
+        for (const ExpectedView& expected : kViews)
+            if (expected.eType != EGraphLayoutType::EGO)
+                QCOMPARE(model.GetViewTitle(expected.eType), DecodeUtf8(expected.pLabel));
+        QCOMPARE(model.GetLayout(EGraphLayoutType::EGO).vecNodes.first().strId, DecodeUtf8(kDefaultFocus));
+        QVERIFY(model.GetLayout(EGraphLayoutType::EGO).vecNodes.first().bFocus);
+        const GraphLayoutOutput* pNetwork = &model.GetLayout(EGraphLayoutType::NETWORK);
+
+        // 다른 개념: 이웃 배치를 버리고 새 초점으로 다시 계산한다. 다른 보기의 배치는 그대로다
+        QVERIFY(model.SetFocusConcept(DecodeUtf8(kYoloId)));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kYoloId));
+        QCOMPARE(model.GetViewTitle(EGraphLayoutType::EGO), DecodeUtf8(kYoloFocusTitle));
+        QVERIFY(!model.HasLayout(EGraphLayoutType::EGO));
+        QVERIFY(model.HasLayout(EGraphLayoutType::NETWORK));
+        QCOMPARE(&model.GetLayout(EGraphLayoutType::NETWORK), pNetwork);
+        GraphLayoutOutput expected;
+        KnowledgeGraphLayout layout;
+        layout.SetStrategy(EGraphLayoutType::EGO);
+        GraphLayoutInput in;
+        in.pGraph = &model.GetGraph();
+        in.strFocusId = DecodeUtf8(kYoloId);
+        in.iDepth = kEgoDepth;
+        QVERIFY(layout.Execute(in, expected));
+        const GraphLayoutOutput& yolo = model.GetLayout(EGraphLayoutType::EGO);
+        QCOMPARE(yolo.vecNodes.size(), expected.vecNodes.size());
+        QCOMPARE(yolo.vecEdges.size(), expected.vecEdges.size());
+        for (int iNode = 0; iNode < expected.vecNodes.size(); ++iNode)
+        {
+            QCOMPARE(yolo.vecNodes[iNode].strId, expected.vecNodes[iNode].strId);
+            QCOMPARE(yolo.vecNodes[iNode].center, expected.vecNodes[iNode].center);
+        }
+        QCOMPARE(yolo.vecNodes.first().strId, DecodeUtf8(kYoloId));
+
+        // 같은 초점이면 배치를 그대로 둔다
+        QVERIFY(!model.SetFocusConcept(DecodeUtf8(kYoloId)));
+        QVERIFY(model.HasLayout(EGraphLayoutType::EGO));
+        // 없는 id: 실제 초점은 기본 초점이다(바뀌었으니 버린다). 그다음 빈 id 도 기본 초점이라 그대로 둔다
+        QVERIFY(model.SetFocusConcept(QStringLiteral("no-such-concept")));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kDefaultFocus));
+        QVERIFY(!model.HasLayout(EGraphLayoutType::EGO));
+        QCOMPARE(model.GetLayout(EGraphLayoutType::EGO).vecNodes.first().strId, DecodeUtf8(kDefaultFocus));
+        QVERIFY(!model.SetFocusConcept(QString()));
+        QVERIFY(model.HasLayout(EGraphLayoutType::EGO));
+        QCOMPARE(model.GetViewTitle(EGraphLayoutType::EGO), DecodeUtf8(kDefaultFocusTitle));
+
+        // 선 없는 점이 초점이면 그 점 하나다. 읽지 못하면 초점도 그대로, 다시 읽으면 기본 초점이다
+        QVERIFY(model.SetFocusConcept(DecodeUtf8(kEdgelessId)));
+        QCOMPARE(model.GetLayout(EGraphLayoutType::EGO).vecNodes.size(), 1);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QVERIFY(!model.Load(dir.filePath(QStringLiteral("no-such-wiki"))));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kEdgelessId));
+        QVERIFY(model.HasLayout(EGraphLayoutType::EGO));
+        QVERIFY(model.Load(ViewerTestSupport::GetShowcaseDir()));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kDefaultFocus));
+        QCOMPARE(model.GetViewTitle(EGraphLayoutType::EGO), DecodeUtf8(kDefaultFocusTitle));
+        QVERIFY(!model.HasLayout(EGraphLayoutType::EGO));
     }
 
     // 상태 줄의 개념 글: 이름 · 종류 · 연도(없으면 "연도 없음"). 모르는 id 는 그대로

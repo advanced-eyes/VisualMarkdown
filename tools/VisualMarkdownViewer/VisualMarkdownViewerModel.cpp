@@ -21,6 +21,7 @@ VisualMarkdownViewerModel::VisualMarkdownViewerModel()
     , m_mapChosenCharts()
     , m_graphLayout()
     , m_chartBuilder()
+    , m_strFocusId()
     , m_strWikiRoot()
     , m_strLastError()
     , m_bLoaded(false)
@@ -46,6 +47,7 @@ bool VisualMarkdownViewerModel::Load(const QString& wikiRoot)
     m_vecDocuments = m_index.ListDocuments();
     m_mapLayouts.clear();
     m_mapChosenCharts.clear();
+    m_strFocusId.clear();
     m_strWikiRoot = wikiRoot;
     m_strLastError.clear();
     m_bLoaded = true;
@@ -54,7 +56,7 @@ bool VisualMarkdownViewerModel::Load(const QString& wikiRoot)
 
 QVector<EGraphLayoutType> VisualMarkdownViewerModel::ListViews()
 {
-    return { EGraphLayoutType::NETWORK, EGraphLayoutType::LINEAGE, EGraphLayoutType::TREE,
+    return { EGraphLayoutType::NETWORK, EGraphLayoutType::EGO, EGraphLayoutType::LINEAGE, EGraphLayoutType::TREE,
              EGraphLayoutType::TIMELINE, EGraphLayoutType::MATRIX, EGraphLayoutType::BIPARTITE };
 }
 
@@ -68,6 +70,7 @@ QString VisualMarkdownViewerModel::GetViewLabel(EGraphLayoutType type)
     case EGraphLayoutType::TIMELINE: return QStringLiteral("타임라인");
     case EGraphLayoutType::MATRIX: return QStringLiteral("관계 행렬");
     case EGraphLayoutType::BIPARTITE: return QStringLiteral("문서 ↔ 개념");
+    case EGraphLayoutType::EGO: return QStringLiteral("이웃");
     }
     return QString();
 }
@@ -82,8 +85,22 @@ QString VisualMarkdownViewerModel::GetViewKey(EGraphLayoutType type)
     case EGraphLayoutType::TIMELINE: return QStringLiteral("timeline");
     case EGraphLayoutType::MATRIX: return QStringLiteral("matrix");
     case EGraphLayoutType::BIPARTITE: return QStringLiteral("bipartite");
+    case EGraphLayoutType::EGO: return QStringLiteral("ego");
     }
     return QString();
+}
+
+QString VisualMarkdownViewerModel::GetViewTitle(EGraphLayoutType type) const
+{
+    const QString strLabel = GetViewLabel(type);
+    if (type != EGraphLayoutType::EGO)
+        return strLabel;
+    const QString strFocus = GetFocusConcept();
+    const int iFocus = m_graph.FindNode(strFocus);
+    if (iFocus < 0)
+        return strLabel;
+    const QString strName = m_graph.GetNodes()[iFocus].strName;
+    return strLabel + kJoin + (strName.isEmpty() ? strFocus : strName);
 }
 
 const GraphLayoutOutput& VisualMarkdownViewerModel::GetLayout(EGraphLayoutType type)
@@ -93,6 +110,11 @@ const GraphLayoutOutput& VisualMarkdownViewerModel::GetLayout(EGraphLayoutType t
         return it->second;
     GraphLayoutInput in;
     in.pGraph = &m_graph;
+    if (type == EGraphLayoutType::EGO)
+    {
+        in.strFocusId = GetFocusConcept();
+        in.iDepth = kEgoDepth;
+    }
     GraphLayoutOutput out;
     m_graphLayout.SetStrategy(type);
     m_graphLayout.Execute(in, out);
@@ -108,6 +130,23 @@ const GraphLayoutOutput* VisualMarkdownViewerModel::FindLayout(EGraphLayoutType 
 {
     const auto it = m_mapLayouts.find(type);
     return it == m_mapLayouts.end() ? nullptr : &it->second;
+}
+
+bool VisualMarkdownViewerModel::SetFocusConcept(const QString& conceptId)
+{
+    const QString strBefore = GetFocusConcept();
+    m_strFocusId = conceptId;
+    if (GetFocusConcept() == strBefore)
+        return false;
+    m_mapLayouts.erase(EGraphLayoutType::EGO);
+    return true;
+}
+
+QString VisualMarkdownViewerModel::GetFocusConcept() const
+{
+    if (m_graph.FindNode(m_strFocusId) >= 0)
+        return m_strFocusId;
+    return KnowledgeGraphLayout::FindDefaultFocus(m_graph);
 }
 
 int VisualMarkdownViewerModel::GetDocumentCount() const

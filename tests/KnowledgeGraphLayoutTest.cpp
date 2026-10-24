@@ -6,10 +6,14 @@
 #include "VisualMarkdown/KnowledgeVocabulary.h"
 
 #include <QHash>
+#include <QLineF>
 #include <QMap>
+#include <QPair>
 #include <QSet>
 #include <QTest>
+#include <QtMath>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -147,7 +151,79 @@ const QVector<ExpectedCell> kCellsWithSeveralKinds { { "결제-모듈-2판", "�
 const QVector<EGraphLayoutType> kAllTypes {
     EGraphLayoutType::NETWORK, EGraphLayoutType::LINEAGE, EGraphLayoutType::TREE,
     EGraphLayoutType::TIMELINE, EGraphLayoutType::MATRIX, EGraphLayoutType::BIPARTITE,
+    EGraphLayoutType::EGO,
 };
+
+// 이웃(design/MoreViews.md §6 · §7.3): 기본 초점은 Faster R-CNN(선 6 · 문서 3. 선 6 인 1단계 검출기 · YOLOv2 보다 문서가 많다).
+// 깊이 2 는 점 12(초점 1 · 1 걸음 6 · 2 걸음 5) · 선 18, 깊이 1 은 점 7 · 선 9
+constexpr const char* kEgoDefaultFocus = "faster-r-cnn";
+constexpr int kEgoNodes = 12;
+constexpr int kEgoEdges = 18;
+constexpr int kEgoDepthOneNodes = 7;
+constexpr int kEgoDepthOneEdges = 9;
+constexpr int kEgoDefaultDepth = 2;
+// 고리의 점(출력 순서)과 쐐기 가운데 각(도. 12시 = −90, 시계 방향으로 는다). 1 걸음 점은 잎 수도 적는다
+struct ExpectedEgoNode
+{
+    const char* pId;
+    double dAngle;
+    int iLeaves;
+};
+const QVector<ExpectedEgoNode> kEgoRingOne {
+    { "fast-r-cnn", -90, 2 }, { "rpn", -22.5, 1 }, { "2단계-검출기", 22.5, 1 }, { "객체-검출", 67.5, 1 }, { "detr", 112.5, 1 }, { "yolo", 180, 2 },
+};
+const QVector<ExpectedEgoNode> kEgoRingTwo {
+    { "r-cnn", -112.5, 1 }, { "roi-풀링", -67.5, 1 }, { "검출기", 22.5, 1 }, { "1단계-검출기", 157.5, 1 }, { "yolov2", 202.5, 1 },
+};
+constexpr double kEgoDegreesPerLeaf = 45;   // 잎 8 이 360° 를 나눈다
+constexpr double kEgoDepthOneStep = 60;     // 깊이 1: 1 걸음 6점이 모두 잎이라 60° 씩
+struct ExpectedParent
+{
+    const char* pChild;
+    const char* pParent;
+};
+const QVector<ExpectedParent> kEgoParents {
+    { "r-cnn", "fast-r-cnn" }, { "roi-풀링", "fast-r-cnn" }, { "검출기", "2단계-검출기" }, { "1단계-검출기", "yolo" }, { "yolov2", "yolo" },
+};
+// 넣는 선 18(from 종류 to, 방향 없는 선은 id 글자 순). 앞 9개가 깊이 1 의 선(초점의 선 6 · 1 걸음 점끼리 3)이다
+const QStringList kEgoEdgeList {
+    "faster-r-cnn improves fast-r-cnn", "faster-r-cnn uses rpn", "faster-r-cnn isA 2단계-검출기", "faster-r-cnn solves 객체-검출",
+    "detr alternative faster-r-cnn", "faster-r-cnn alternative yolo",
+    "fast-r-cnn isA 2단계-검출기", "detr solves 객체-검출", "yolo solves 객체-검출",
+    "fast-r-cnn improves r-cnn", "fast-r-cnn uses roi-풀링", "r-cnn isA 2단계-검출기", "2단계-검출기 isA 검출기", "detr isA 검출기",
+    "yolo isA 1단계-검출기", "yolov2 improves yolo",
+    "yolov2 isA 1단계-검출기", "1단계-검출기 isA 검출기",
+};
+// 나무 선 11(초점의 선 6 · 부모와 자식을 잇는 선 5)과 둘레 선 7(1 걸음 점끼리 3 · 부모가 아닌 앞 고리 점과의 선 2 · 2 걸음 점끼리 2)
+const QStringList kEgoTreeEdgeList {
+    "faster-r-cnn improves fast-r-cnn", "faster-r-cnn uses rpn", "faster-r-cnn isA 2단계-검출기", "faster-r-cnn solves 객체-검출",
+    "detr alternative faster-r-cnn", "faster-r-cnn alternative yolo",
+    "fast-r-cnn improves r-cnn", "fast-r-cnn uses roi-풀링", "2단계-검출기 isA 검출기", "yolo isA 1단계-검출기", "yolov2 improves yolo",
+};
+const QStringList kEgoContextEdgeList {
+    "fast-r-cnn isA 2단계-검출기", "detr solves 객체-검출", "yolo solves 객체-검출",
+    "r-cnn isA 2단계-검출기", "detr isA 검출기",
+    "yolov2 isA 1단계-검출기", "1단계-검출기 isA 검출기",
+};
+// 허브 초점(1단계 검출기, 선 6) 깊이 2: 1 걸음 6 · 2 걸음 7, 나무 선 13 · 둘레 선 8.
+// 2 걸음의 부모: 2단계 검출기 · DETR ← 검출기, Focal Loss ← RetinaNet, Faster R-CNN · 객체 검출 ← YOLO, Darknet-19 · 배치 정규화 ← YOLOv2
+constexpr const char* kHubFocus = "1단계-검출기";
+const QStringList kHubTreeEdgeList {
+    "1단계-검출기 isA 검출기", "retinanet isA 1단계-검출기", "ssd isA 1단계-검출기", "yolo isA 1단계-검출기", "yolov2 isA 1단계-검출기",
+    "yolov3 isA 1단계-검출기",
+    "2단계-검출기 isA 검출기", "detr isA 검출기", "retinanet uses focal-loss", "faster-r-cnn alternative yolo", "yolo solves 객체-검출",
+    "yolov2 uses darknet-19", "yolov2 uses 배치-정규화",
+};
+const QStringList kHubContextEdgeList {
+    "yolov2 improves yolo", "ssd alternative yolov2", "yolov3 improves yolov2", "retinanet alternative yolov3",
+    "faster-r-cnn isA 2단계-검출기", "faster-r-cnn solves 객체-검출", "detr solves 객체-검출", "detr alternative faster-r-cnn",
+};
+constexpr const char* kEdgelessConcept = "coco";   // 선 없는 점: 초점이면 점 1 · 선 0
+constexpr double kAngleTolerance = 1e-6;           // 각 견줌의 여유(도)
+constexpr int kEgoMaxDepth = 3;                    // 모든 점을 초점으로 돌려 보는 가장 깊은 깊이
+constexpr double kFullTurn = 360;
+constexpr double kHalfTurn = 180;
+constexpr double kTwelveOClock = -90;              // 화면 좌표(y 가 아래)에서 12시 각(도). 시계 방향으로 는다
 
 constexpr double kTolerance = 1e-6;   // 경계 · 자리 견줌의 여유(배치 단위)
 constexpr int kRoundTripDigits = 17;  // FormatNumber 의 자리 수
@@ -180,6 +256,7 @@ QString GetTypeName(EGraphLayoutType type)
     case EGraphLayoutType::TIMELINE: return QStringLiteral("TIMELINE");
     case EGraphLayoutType::MATRIX: return QStringLiteral("MATRIX");
     case EGraphLayoutType::BIPARTITE: return QStringLiteral("BIPARTITE");
+    case EGraphLayoutType::EGO: return QStringLiteral("EGO");
     }
     return QStringLiteral("?");
 }
@@ -209,6 +286,18 @@ bool RunLayout(const KnowledgeGraph& graph, EGraphLayoutType type, GraphLayoutOu
     return layout.Execute(in, *out);
 }
 
+// 초점 id 와 깊이를 준 배치(이웃 보기가 보는 칸. 다른 전략은 보지 않는다)
+bool RunLayoutWithFocus(const KnowledgeGraph& graph, EGraphLayoutType type, const QString& focus, int depth, GraphLayoutOutput* out)
+{
+    KnowledgeGraphLayout layout;
+    layout.SetStrategy(type);
+    GraphLayoutInput in;
+    in.pGraph = &graph;
+    in.strFocusId = focus;
+    in.iDepth = depth;
+    return layout.Execute(in, *out);
+}
+
 // 숫자는 17자리로 적는다. 글이 같으면 double 이 비트까지 같다(-0 과 0, nan 도 글이 다르다)
 QString FormatNumber(double value) { return QString::number(value, 'g', kRoundTripDigits); }
 
@@ -220,11 +309,11 @@ QStringList DescribeLayout(const GraphLayoutOutput& out)
     QStringList vecLines;
     for (const LayoutNode& node : out.vecNodes)
         vecLines << QStringList { QStringLiteral("node"), node.strId, node.strLabel, node.strKind, FormatNumber(node.center.x()),
-                                  FormatNumber(node.center.y()), FormatBool(node.bDocument) }.join(QLatin1Char('|'));
+                                  FormatNumber(node.center.y()), FormatBool(node.bDocument), FormatBool(node.bFocus) }.join(QLatin1Char('|'));
     for (const LayoutEdge& edge : out.vecEdges)
         vecLines << QStringList { QStringLiteral("edge"), QString::number(edge.iFrom), QString::number(edge.iTo), edge.strKind,
                                   QString::number(static_cast<int>(edge.eStatus)), FormatBool(edge.bDirected),
-                                  QString::number(edge.iGraphEdge), QString::number(edge.iWeight) }.join(QLatin1Char('|'));
+                                  QString::number(edge.iGraphEdge), QString::number(edge.iWeight), FormatBool(edge.bContext) }.join(QLatin1Char('|'));
     for (const LayoutTick& tick : out.vecTicks)
         vecLines << QStringList { QStringLiteral("tick"), FormatNumber(tick.dPosition), tick.strLabel }.join(QLatin1Char('|'));
     for (const LayoutLane& lane : out.vecLanes)
@@ -598,9 +687,213 @@ QString CompareComponentShapes(const KnowledgeGraph& graph, const QVector<Knowle
     }
     return iCompared > 0 ? QString() : QStringLiteral("no component with an edge");
 }
+
+// 이웃 배치: 가운데(초점)에서 본 점의 각(도, −180–180). 화면 좌표(y 가 아래)라 12시가 −90 이고 시계 방향으로 는다
+double GetAngleDegrees(const QPointF& center, const QPointF& point)
+{
+    return qRadiansToDegrees(std::atan2(point.y() - center.y(), point.x() - center.x()));
 }
 
-// 그래프 모델(KnowledgeGraph)과 배치 6가지(KnowledgeGraphLayout, design/Views.md §5)를 showcase 와 작은 합성 그래프로 시험한다.
+// 두 각의 차(도)를 −180–180 으로
+double GetAngleDifference(double first, double second)
+{
+    double dDifference = std::fmod(first - second, kFullTurn);
+    if (dDifference > kHalfTurn)
+        dDifference -= kFullTurn;
+    if (dDifference < -kHalfTurn)
+        dDifference += kFullTurn;
+    return dDifference;
+}
+
+bool IsSameAngle(double first, double second)
+{
+    return std::abs(GetAngleDifference(first, second)) < kAngleTolerance;
+}
+
+// 방향을 보지 않고 선을 따라 focus 에서 걸은 걸음 수(제 자신으로 가는 선은 보지 않는다). 닿지 않는 점은 -1
+QVector<int> ComputeHops(const KnowledgeGraph& graph, int focus)
+{
+    const int iNodeCount = graph.GetNodes().size();
+    QVector<QVector<int>> vecNeighbors(iNodeCount);
+    for (const KnowledgeGraphEdge& edge : graph.GetEdges())
+    {
+        if (edge.iFrom == edge.iTo)
+            continue;
+        vecNeighbors[edge.iFrom] << edge.iTo;
+        vecNeighbors[edge.iTo] << edge.iFrom;
+    }
+    QVector<int> vecHops(iNodeCount, -1);
+    if (focus < 0 || focus >= iNodeCount)
+        return vecHops;
+    vecHops[focus] = 0;
+    QVector<int> vecQueue { focus };
+    for (int iNext = 0; iNext < vecQueue.size(); ++iNext)
+    {
+        for (const int iNeighbor : vecNeighbors[vecQueue[iNext]])
+        {
+            if (vecHops[iNeighbor] >= 0)
+                continue;
+            vecHops[iNeighbor] = vecHops[vecQueue[iNext]] + 1;
+            vecQueue << iNeighbor;
+        }
+    }
+    return vecHops;
+}
+
+// 이웃 배치가 지킬 조건(design/MoreViews.md §6.1). 맞으면 빈 글, 아니면 처음 어긋난 것.
+// 점: 깊이 안의 점 전부를 한 번씩, 첫 점은 초점(bFocus 는 초점만), 그다음 걸음 수 순. 고리마다 반지름이 같고 바깥 고리가 더 크다.
+// 한 고리의 점은 시계 방향으로 한 바퀴 안에 차례로 놓이고, 첫 1 걸음 점은 12시다. 선: 넣은 점 사이의 그래프 선 전부(그래프 선 순서).
+// 점 상자가 겹치지 않고, 경계가 점 상자를 모두 담고, 값이 유한하다
+QString CheckEgoLayout(const KnowledgeGraph& graph, const GraphLayoutOutput& out, const QString& focus, int depth)
+{
+    const QString strWhere = focus + QStringLiteral(" depth %1: ").arg(depth);
+    const int iFocus = graph.FindNode(focus);
+    if (iFocus < 0)
+        return strWhere + QStringLiteral("the focus is not a node");
+    const QVector<int> vecHops = ComputeHops(graph, iFocus);
+    const auto funcIncluded = [&vecHops, depth](int node) { return vecHops[node] >= 0 && vecHops[node] <= depth; };
+    QStringList vecExpectedIds;
+    for (int iNode = 0; iNode < graph.GetNodes().size(); ++iNode)
+        if (funcIncluded(iNode))
+            vecExpectedIds << graph.GetNodes()[iNode].strId;
+    const QStringList vecIds = ListNodeIds(out);
+    const QString strNodeDiff = DiffItems(QStringLiteral("nodes"), vecIds, vecExpectedIds);
+    if (!strNodeDiff.isEmpty())
+        return strWhere + strNodeDiff;
+    if (QSet<QString>(vecIds.cbegin(), vecIds.cend()).size() != vecIds.size())
+        return strWhere + QStringLiteral("a node appears twice");
+    if (out.vecNodes.isEmpty() || out.vecNodes[0].strId != focus)
+        return strWhere + QStringLiteral("the first node is not the focus");
+
+    const QPointF ptCenter = out.vecNodes[0].center;
+    QVector<double> vecRingRadius(depth + 1, -1);
+    vecRingRadius[0] = 0;
+    QVector<double> vecLastAngle(depth + 1, qQNaN());
+    QVector<double> vecTurned(depth + 1, 0);
+    int iPreviousHop = 0;
+    for (int iNode = 0; iNode < out.vecNodes.size(); ++iNode)
+    {
+        const LayoutNode& node = out.vecNodes[iNode];
+        const QString strNode = DescribePoint(node.strId, node.center);
+        if (node.bFocus != (iNode == 0))
+            return strWhere + strNode + QStringLiteral(" bFocus ") + FormatBool(node.bFocus);
+        if (node.bDocument)
+            return strWhere + strNode + QStringLiteral(" is a document");
+        const int iHop = vecHops[graph.FindNode(node.strId)];
+        if (iHop < iPreviousHop)
+            return strWhere + strNode + QStringLiteral(" (ring %1) comes after ring %2").arg(iHop).arg(iPreviousHop);
+        iPreviousHop = iHop;
+        if (iHop == 0)
+            continue;
+        const double dRadius = QLineF(ptCenter, node.center).length();
+        if (vecRingRadius[iHop] < 0)
+        {
+            if (vecRingRadius[iHop - 1] < 0 || dRadius <= vecRingRadius[iHop - 1] + kTolerance)
+                return strWhere + strNode + QStringLiteral(" ring %1 radius %2 does not grow from %3").arg(iHop).arg(dRadius).arg(vecRingRadius[iHop - 1]);
+            vecRingRadius[iHop] = dRadius;
+        }
+        else if (!IsNear(dRadius, vecRingRadius[iHop]))
+        {
+            return strWhere + strNode + QStringLiteral(" radius %1 differs from its ring %2").arg(dRadius).arg(vecRingRadius[iHop]);
+        }
+        const double dAngle = GetAngleDegrees(ptCenter, node.center);
+        if (std::isnan(vecLastAngle[iHop]))
+        {
+            if (iHop == 1 && !IsSameAngle(dAngle, kTwelveOClock))
+                return strWhere + strNode + QStringLiteral(" is the first ring-1 node but not at 12 o'clock (%1)").arg(dAngle);
+        }
+        else
+        {
+            const double dStep = std::fmod(dAngle - vecLastAngle[iHop] + 2 * kFullTurn, kFullTurn);
+            vecTurned[iHop] += dStep;
+            if (dStep <= kAngleTolerance || vecTurned[iHop] >= kFullTurn - kAngleTolerance)
+                return strWhere + strNode + QStringLiteral(" is not clockwise after the previous node of ring %1").arg(iHop);
+        }
+        vecLastAngle[iHop] = dAngle;
+    }
+
+    QStringList vecExpectedEdges;
+    for (const KnowledgeGraphEdge& edge : graph.GetEdges())
+        if (funcIncluded(edge.iFrom) && funcIncluded(edge.iTo))
+            vecExpectedEdges << DescribeGraphEdge(edge);
+    QStringList vecEdges;
+    int iPreviousGraphEdge = -1;
+    for (const LayoutEdge& edge : out.vecEdges)
+    {
+        if (edge.iFrom < 0 || edge.iFrom >= out.vecNodes.size() || edge.iTo < 0 || edge.iTo >= out.vecNodes.size())
+            return strWhere + QStringLiteral("an edge points outside the nodes");
+        if (edge.iGraphEdge <= iPreviousGraphEdge || edge.iGraphEdge >= graph.GetEdges().size())
+            return strWhere + QStringLiteral("edges are not in graph edge order");
+        iPreviousGraphEdge = edge.iGraphEdge;
+        const KnowledgeGraphEdge& graphEdge = graph.GetEdges()[edge.iGraphEdge];
+        if (DescribeLayoutEdge(out, edge) != DescribeGraphEdge(graphEdge) || edge.eStatus != graphEdge.edge.eStatus || edge.bDirected != graphEdge.bDirected)
+            return strWhere + DescribeLayoutEdge(out, edge) + QStringLiteral(" does not match its graph edge");
+        vecEdges << DescribeLayoutEdge(out, edge);
+    }
+    if (vecEdges != vecExpectedEdges)
+        return strWhere + QStringLiteral("edges [") + vecEdges.join(QStringLiteral(", ")) + QStringLiteral("] expected [")
+               + vecExpectedEdges.join(QStringLiteral(", ")) + QLatin1Char(']');
+
+    // 나무 선 · 둘레 선: 출력 순서가 고리 순서라, k 걸음 점의 부모는 앞 고리에서 이어진 점 가운데 출력에서 가장 앞인 점이다(1 걸음 점의 부모는 초점).
+    // 점과 그 부모를 잇는 선은 모두 나무 선이고, 그 밖(같은 고리 점끼리 · 부모가 아닌 앞 고리 점과 · 제 자신으로 가는 선)은 둘레 선이다
+    QHash<QString, int> hashPosition;
+    for (int iNode = 0; iNode < out.vecNodes.size(); ++iNode)
+        hashPosition.insert(out.vecNodes[iNode].strId, iNode);
+    const QVector<KnowledgeGraphNode>& vecGraphNodes = graph.GetNodes();
+    QVector<int> vecParent(vecGraphNodes.size(), -1);   // 그래프 점 번호 → 부모 점 번호
+    for (const KnowledgeGraphEdge& edge : graph.GetEdges())
+    {
+        if (edge.iFrom == edge.iTo)
+            continue;
+        for (const QPair<int, int>& pairEnds : { qMakePair(edge.iFrom, edge.iTo), qMakePair(edge.iTo, edge.iFrom) })
+        {
+            const int iChild = pairEnds.first;
+            const int iCandidate = pairEnds.second;
+            if (!funcIncluded(iChild) || vecHops[iChild] == 0 || vecHops[iCandidate] != vecHops[iChild] - 1)
+                continue;
+            int& iParent = vecParent[iChild];
+            if (iParent < 0 || hashPosition.value(vecGraphNodes[iCandidate].strId) < hashPosition.value(vecGraphNodes[iParent].strId))
+                iParent = iCandidate;
+        }
+    }
+    for (const LayoutEdge& edge : out.vecEdges)
+    {
+        const KnowledgeGraphEdge& graphEdge = graph.GetEdges()[edge.iGraphEdge];
+        const bool bTree = graphEdge.iFrom != graphEdge.iTo && (vecParent[graphEdge.iFrom] == graphEdge.iTo || vecParent[graphEdge.iTo] == graphEdge.iFrom);
+        if (edge.bContext == bTree)
+            return strWhere + DescribeLayoutEdge(out, edge) + (bTree ? QStringLiteral(" joins a node and its parent but is a context edge")
+                                                                    : QStringLiteral(" is not a tree edge but is not marked as context"));
+    }
+
+    const QStringList vecOverlaps = FindOverlaps(out);
+    if (!vecOverlaps.isEmpty())
+        return strWhere + QStringLiteral("overlaps ") + vecOverlaps.join(QStringLiteral(", "));
+    const QStringList vecNonFinite = FindNonFinite(out);
+    if (!vecNonFinite.isEmpty())
+        return strWhere + QStringLiteral("not finite ") + vecNonFinite.join(QStringLiteral(", "));
+    for (const LayoutNode& node : out.vecNodes)
+        if (!ContainsWithTolerance(out.bounds, MakeBox(node)))
+            return strWhere + DescribePoint(node.strId, node.center) + QStringLiteral(" is outside the bounds ") + DescribeBox(out.bounds);
+    if (!out.vecTicks.isEmpty() || !out.vecLanes.isEmpty() || !out.vecMatrixOrder.isEmpty() || !out.vecCells.isEmpty() || !out.vecUnplaced.isEmpty())
+        return strWhere + QStringLiteral("has ticks, lanes, matrix cells or unplaced nodes");
+    return QString();
+}
+
+// 문서 하나: 카드 하나가 conceptIds 를 가리킨다(다루는 문서 수를 늘릴 때)
+KnowledgeDocument MakeDocumentPointingTo(const QString& id, const QStringList& conceptIds)
+{
+    KnowledgeDocument document;
+    document.strId = id;
+    document.strTitle = id;
+    KnowledgeCard card;
+    for (const QString& strConceptId : conceptIds)
+        card.vecConcepts << MakeLink(strConceptId);
+    document.vecCards = { card };
+    return document;
+}
+}
+
+// 그래프 모델(KnowledgeGraph)과 배치 7가지(KnowledgeGraphLayout, design/Views.md §5 · design/MoreViews.md §6)를 showcase 와 작은 합성 그래프로 시험한다.
 // showcase 기대값은 Views.md §5 끝의 목록이고, 그 밖에 배치 조건(겹침 없음 · 방향 · 깊이 · 순서 · 경계 · 유한한 값)과
 // 같은 입력이면 같은 출력인지를 본다.
 class KnowledgeGraphLayoutTest : public QObject
@@ -1166,6 +1459,7 @@ private slots:
             QVERIFY(edge.iTo >= 0 && edge.iTo < out.vecNodes.size());
             QVERIFY(edge.iGraphEdge >= -1 && edge.iGraphEdge < m_graph.GetEdges().size());
             QVERIFY(edge.iWeight >= 1);
+            QVERIFY2(!edge.bContext || eType == EGraphLayoutType::EGO, qUtf8Printable(DescribeLayoutEdge(out, edge)));   // 둘레 선은 이웃만 쓴다
         }
         QVERIFY(!out.bounds.isEmpty());
         for (const LayoutNode& node : out.vecNodes)
@@ -1183,11 +1477,14 @@ private slots:
         for (const LayoutTick& tick : out.vecTicks)
             QVERIFY2(tick.dPosition >= out.bounds.left() - kTolerance && tick.dPosition <= out.bounds.right() + kTolerance, qUtf8Printable(tick.strLabel));
         QSet<QString> setIds;
-        for (const LayoutNode& node : out.vecNodes)
+        for (int iNode = 0; iNode < out.vecNodes.size(); ++iNode)
         {
+            const LayoutNode& node = out.vecNodes[iNode];
             QVERIFY2(!setIds.contains(node.strId), qUtf8Printable(node.strId));   // 점마다 한 번
             setIds.insert(node.strId);
             QVERIFY2(node.strId != DecodeUtf8(kHiddenConcept), kHiddenConcept);
+            // 초점 점은 이웃 보기의 첫 점 하나뿐이다
+            QVERIFY2(node.bFocus == (eType == EGraphLayoutType::EGO && iNode == 0), qUtf8Printable(node.strId));
         }
     }
 
@@ -1303,6 +1600,11 @@ private slots:
                 QCOMPARE(DescribeLayout(out), DescribeLayout(GraphLayoutOutput()));
                 QVERIFY(out.bounds.isNull());
             }
+            // 이웃: 초점을 주어도 점이 없으면 빈 배치, 기본 초점은 빈 글
+            GraphLayoutOutput out;
+            QVERIFY(RunLayoutWithFocus(*pGraph, EGraphLayoutType::EGO, QStringLiteral("a"), kEgoDefaultDepth, &out));
+            QCOMPARE(DescribeLayout(out), DescribeLayout(GraphLayoutOutput()));
+            QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(*pGraph), QString());
         }
     }
 
@@ -1334,6 +1636,15 @@ private slots:
         QVERIFY(RunLayout(graph, EGraphLayoutType::MATRIX, &out));
         QCOMPARE(out.vecMatrixOrder, QStringList { "a" });
         QVERIFY(out.vecCells.isEmpty());
+
+        // 이웃: 기본 초점이 그 점이고, 배치는 그 점 하나(가운데, 초점)
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(graph), QString("a"));
+        QVERIFY(RunLayout(graph, EGraphLayoutType::EGO, &out));
+        QCOMPARE(ListNodeIds(out), QStringList { "a" });
+        QVERIFY(out.vecNodes[0].bFocus);
+        QVERIFY(out.vecEdges.isEmpty());
+        QCOMPARE(out.bounds.size(), QSizeF(GraphLayoutSize::kNodeWidth, GraphLayoutSize::kNodeHeight));
+        QVERIFY(ContainsWithTolerance(out.bounds, MakeBox(out.vecNodes[0])));
 
         // 연도가 없거나 네 자리가 아니면 타임라인에 놓지 않는다. 연도 없는 점은 id 가 아니라 이름 열쇠 순이다
         const KnowledgeGraph undated = KnowledgeGraph::BuildFromParts({ MakeConcept("z", "Alpha"), MakeConcept("b", "B", "98"), MakeConcept("c", "C", "2020s") }, {}, {});
@@ -1787,6 +2098,361 @@ private slots:
         QCOMPARE(ListLaneLabels(timeline), (QStringList { "P1", "P2" }));
         QCOMPARE(ListNodesInLane(timeline, timeline.vecLanes[0]), (QStringList { "p1", "x" }));
         QCOMPARE(ListNodesInLane(timeline, timeline.vecLanes[1]), (QStringList { "p2", "y" }));
+    }
+
+    // 이웃의 기본 초점: 선이 가장 많은 점, 같으면 다루는 문서가 많은 점, 같으면 점 번호(id 가 아니라 이름 열쇠) 순으로 앞의 것. 점이 없으면 빈 글
+    void egoDefaultFocus()
+    {
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(m_graph), DecodeUtf8(kEgoDefaultFocus));
+
+        // 선 수가 먼저다: 이름 열쇠로 앞선 Alpha 가 아니라 선 2 인 Beta
+        const KnowledgeGraph byEdges = KnowledgeGraph::BuildFromParts({ MakeConcept("a", "Alpha"), MakeConcept("b", "Beta"), MakeConcept("c", "Gamma") },
+                                                                      { MakeEdge("b", "uses", "a"), MakeEdge("b", "uses", "c") }, {});
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(byEdges), QString("b"));
+
+        // 선 수가 같으면 다루는 문서가 많은 점: Xi 가 아니라 문서 하나가 가리키는 Ypsilon
+        const KnowledgeGraph byDocuments = KnowledgeGraph::BuildFromParts({ MakeConcept("x", "Xi"), MakeConcept("y", "Ypsilon") },
+                                                                          { MakeEdge("x", "uses", "y") },
+                                                                          { MakeDocumentPointingTo("doc", { "y" }) });
+        QCOMPARE(byDocuments.GetNodes()[byDocuments.FindNode("y")].iDocumentCount, 1);
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(byDocuments), QString("y"));
+
+        // 선 수 · 문서 수가 같으면 점 번호 순: id 는 뒤지만 이름 열쇠가 앞선 Alpha(id z-id)
+        const KnowledgeGraph byNameKey = KnowledgeGraph::BuildFromParts({ MakeConcept("a-id", "Beta"), MakeConcept("z-id", "Alpha") },
+                                                                        { MakeEdge("a-id", "uses", "z-id") }, {});
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(byNameKey), QString("z-id"));
+
+        // 선이 하나도 없으면 문서 수로 고른다
+        const KnowledgeGraph edgeless = KnowledgeGraph::BuildFromParts({ MakeConcept("p", "P"), MakeConcept("q", "Q") }, {},
+                                                                       { MakeDocumentPointingTo("doc", { "q" }) });
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(edgeless), QString("q"));
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(KnowledgeGraph()), QString());
+    }
+
+    // 이웃(깊이 2, 기본 초점 Faster R-CNN): 점 12 · 선 18(design/MoreViews.md §7.3). 1 걸음 6점은 12시에서 시계 방향으로 잇는 선의 관계 종류 순,
+    // 2 걸음 5점은 각 순이다. 쐐기의 가운데 각, 잎 수에 비례한 쐐기, 부모 쐐기 안의 자식, 넣는 선 18개, 고리마다 같은 반지름, 겹침 없음
+    void egoShowcaseDepthTwo()
+    {
+        const GraphLayoutOutput& out = GetOutput(EGraphLayoutType::EGO);
+        QCOMPARE(out.vecNodes.size(), kEgoNodes);
+        QCOMPARE(out.vecEdges.size(), kEgoEdges);
+        QStringList vecExpectedIds { DecodeUtf8(kEgoDefaultFocus) };
+        for (const QVector<ExpectedEgoNode>* pRing : { &kEgoRingOne, &kEgoRingTwo })
+            for (const ExpectedEgoNode& expected : *pRing)
+                vecExpectedIds << DecodeUtf8(expected.pId);
+        QCOMPARE(ListNodeIds(out), vecExpectedIds);
+        QVERIFY(out.vecNodes[0].bFocus);
+        QCOMPARE(out.vecNodes[0].center, QPointF(0, 0));
+
+        // 가운데 각
+        const QPointF ptCenter = out.vecNodes[0].center;
+        QHash<QString, double> hashAngles;
+        for (const QVector<ExpectedEgoNode>* pRing : { &kEgoRingOne, &kEgoRingTwo })
+        {
+            for (const ExpectedEgoNode& expected : *pRing)
+            {
+                const QString strId = DecodeUtf8(expected.pId);
+                const double dAngle = GetAngleDegrees(ptCenter, GetCenter(out, strId));
+                QVERIFY2(IsSameAngle(dAngle, expected.dAngle), qUtf8Printable(strId + QStringLiteral(" %1 / expected %2").arg(dAngle).arg(expected.dAngle)));
+                hashAngles.insert(strId, dAngle);
+            }
+        }
+        // 쐐기는 잎 수에 비례한다: 이웃한 1 걸음 두 점의 각 차는 (앞 잎 + 뒤 잎) / 2 × 45°
+        int iLeaves = 0;
+        for (int iNode = 0; iNode < kEgoRingOne.size(); ++iNode)
+        {
+            iLeaves += kEgoRingOne[iNode].iLeaves;
+            const ExpectedEgoNode& current = kEgoRingOne[iNode];
+            const ExpectedEgoNode& next = kEgoRingOne[(iNode + 1) % kEgoRingOne.size()];
+            const double dStep = std::fmod(hashAngles.value(DecodeUtf8(next.pId)) - hashAngles.value(DecodeUtf8(current.pId)) + 2 * kFullTurn, kFullTurn);
+            QVERIFY2(std::abs(dStep - (current.iLeaves + next.iLeaves) / 2.0 * kEgoDegreesPerLeaf) < kAngleTolerance, current.pId);
+        }
+        QCOMPARE(iLeaves * kEgoDegreesPerLeaf, kFullTurn);
+
+        // 부모: 자식과 선으로 이어져 있고, 자식은 부모 쐐기(부모 각 ± 잎 수 × 45° / 2) 안에 있다
+        for (const ExpectedParent& expected : kEgoParents)
+        {
+            const QString strChild = DecodeUtf8(expected.pChild);
+            const QString strParent = DecodeUtf8(expected.pParent);
+            const int iChild = FindLayoutNode(out, strChild);
+            const int iParent = FindLayoutNode(out, strParent);
+            QVERIFY(iChild >= 0 && iParent >= 0);
+            const bool bLinked = std::any_of(out.vecEdges.cbegin(), out.vecEdges.cend(), [iChild, iParent](const LayoutEdge& edge)
+            {
+                return (edge.iFrom == iChild && edge.iTo == iParent) || (edge.iFrom == iParent && edge.iTo == iChild);
+            });
+            QVERIFY2(bLinked, expected.pChild);
+            int iParentLeaves = 0;
+            for (const ExpectedEgoNode& ringOne : kEgoRingOne)
+                if (DecodeUtf8(ringOne.pId) == strParent)
+                    iParentLeaves = ringOne.iLeaves;
+            QVERIFY2(std::abs(GetAngleDifference(hashAngles.value(strChild), hashAngles.value(strParent))) < iParentLeaves * kEgoDegreesPerLeaf / 2,
+                     expected.pChild);
+        }
+
+        // 선 18개(그래프 선 순서, 끝은 출력 점 자리)
+        QStringList vecEdges;
+        for (const LayoutEdge& edge : out.vecEdges)
+            vecEdges << DescribeLayoutEdge(out, edge);
+        const QString strDiff = DiffItems(QStringLiteral("edges"), vecEdges, kEgoEdgeList);
+        QVERIFY2(strDiff.isEmpty(), qUtf8Printable(strDiff));
+        const QString strCheck = CheckEgoLayout(m_graph, out, DecodeUtf8(kEgoDefaultFocus), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+    }
+
+    // 이웃 깊이 1: 점 7 · 선 9(초점의 선 6 · 1 걸음 점끼리 3). 1 걸음 점은 모두 잎이라 60° 씩이고 첫 점이 12시다.
+    // 1 아래 깊이는 1 이고, 깊이를 주지 않으면 2 다
+    void egoShowcaseDepthOne()
+    {
+        GraphLayoutOutput out;
+        QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, QString(), 1, &out));
+        QCOMPARE(out.vecNodes.size(), kEgoDepthOneNodes);
+        QCOMPARE(out.vecEdges.size(), kEgoDepthOneEdges);
+        QStringList vecExpectedIds { DecodeUtf8(kEgoDefaultFocus) };
+        for (const ExpectedEgoNode& expected : kEgoRingOne)
+            vecExpectedIds << DecodeUtf8(expected.pId);
+        QCOMPARE(ListNodeIds(out), vecExpectedIds);
+        for (int iNode = 0; iNode < kEgoRingOne.size(); ++iNode)
+        {
+            const double dAngle = GetAngleDegrees(out.vecNodes[0].center, out.vecNodes[iNode + 1].center);
+            QVERIFY2(IsSameAngle(dAngle, kTwelveOClock + iNode * kEgoDepthOneStep),
+                     qUtf8Printable(out.vecNodes[iNode + 1].strId + QStringLiteral(" %1").arg(dAngle)));
+        }
+        QStringList vecEdges;
+        for (const LayoutEdge& edge : out.vecEdges)
+            vecEdges << DescribeLayoutEdge(out, edge);
+        const QString strDiff = DiffItems(QStringLiteral("edges"), vecEdges, kEgoEdgeList.mid(0, kEgoDepthOneEdges));
+        QVERIFY2(strDiff.isEmpty(), qUtf8Printable(strDiff));
+        const QString strCheck = CheckEgoLayout(m_graph, out, DecodeUtf8(kEgoDefaultFocus), 1);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        for (const int iDepth : { 0, -3 })
+        {
+            GraphLayoutOutput shallow;
+            QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, QString(), iDepth, &shallow));
+            QCOMPARE(DescribeLayout(shallow), DescribeLayout(out));
+        }
+        QCOMPARE(GraphLayoutInput().iDepth, kEgoDefaultDepth);
+        QCOMPARE(GraphLayoutInput().strFocusId, QString());
+    }
+
+    // 이웃의 초점: 받은 id 가 보이는 점이면 그 점. 비었거나 없는 id · 숨은 개념 · 개념 파일이 없는 id 는 기본 초점과 같은 배치다.
+    // 선 없는 점(COCO)이 초점이면 그 점 하나다
+    void egoFocusChoice()
+    {
+        const QStringList vecDefault = DescribeLayout(GetOutput(EGraphLayoutType::EGO));
+        for (const QString& strFocus : { QString(), QStringLiteral("no-such-concept"), DecodeUtf8(kHiddenConcept), DecodeUtf8(kMissingConcept),
+                                         DecodeUtf8(kEgoDefaultFocus) })
+        {
+            GraphLayoutOutput out;
+            QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, strFocus, kEgoDefaultDepth, &out));
+            QVERIFY2(DescribeLayout(out) == vecDefault, qUtf8Printable(strFocus));
+        }
+
+        GraphLayoutOutput edgeless;
+        QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, DecodeUtf8(kEdgelessConcept), kEgoDefaultDepth, &edgeless));
+        QCOMPARE(ListNodeIds(edgeless), QStringList { DecodeUtf8(kEdgelessConcept) });
+        QVERIFY(edgeless.vecNodes[0].bFocus);
+        QVERIFY(edgeless.vecEdges.isEmpty());
+        QCOMPARE(edgeless.bounds.size(), QSizeF(GraphLayoutSize::kNodeWidth, GraphLayoutSize::kNodeHeight));
+
+        GraphLayoutOutput yolo;
+        QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, QStringLiteral("yolo"), kEgoDefaultDepth, &yolo));
+        QCOMPARE(yolo.vecNodes[0].strId, QString("yolo"));
+        const QString strCheck = CheckEgoLayout(m_graph, yolo, QStringLiteral("yolo"), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+    }
+
+    // showcase 의 모든 점을 초점으로 깊이 1–3: 깊이 안의 점 · 선 전부, 걸음 수 순, 고리마다 같은 반지름(바깥이 더 크다),
+    // 고리 안은 시계 방향, 겹침 없음(허브 1단계 검출기 · 잎 RoI 풀링 · 선 없는 점도). 같은 입력이면 같은 출력이다
+    void egoEveryFocusKeepsRules()
+    {
+        for (const KnowledgeGraphNode& node : m_graph.GetNodes())
+        {
+            for (int iDepth = 1; iDepth <= kEgoMaxDepth; ++iDepth)
+            {
+                GraphLayoutOutput out;
+                QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, node.strId, iDepth, &out));
+                const QString strCheck = CheckEgoLayout(m_graph, out, node.strId, iDepth);
+                QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+                GraphLayoutOutput again;
+                QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, node.strId, iDepth, &again));
+                QCOMPARE(DescribeLayout(again), DescribeLayout(out));
+            }
+        }
+    }
+
+    // 1 걸음 점의 순서: 초점과 잇는 선의 관계 종류(어휘 순: 개선 · 사용 · 종류 · 해결 · 대안. 선이 둘 이상이면 앞의 종류),
+    // 같으면 초점에서 나가는 선 → 들어오는 선 → 방향 없는 선, 같으면 점 번호(id 가 아니라 이름 열쇠) 순. 어휘에 없는 종류는 뒤다.
+    // 모두 잎이라 쐐기가 같다(점 8 → 45° 씩)
+    void egoRingOneOrder()
+    {
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(
+            { MakeConcept("f", "Focus"), MakeConcept("a", "Alpha"), MakeConcept("b", "Beta"), MakeConcept("c", "Gamma"), MakeConcept("d", "Delta"),
+              MakeConcept("e", "Epsilon"), MakeConcept("g", "Eta"), MakeConcept("h", "Theta"), MakeConcept("a-u", "Upsilon") },
+            { MakeEdge("f", "alternative", "a"),                                 // 방향 없는 대안
+              MakeEdge("b", "improves", "f"),                                    // 들어오는 개선
+              MakeEdge("f", "improves", "c"),                                    // 나가는 개선
+              MakeEdge("f", "uses", "d"),                                        // 나가는 사용
+              MakeEdge("e", "uses", "f"),                                        // 들어오는 사용
+              MakeEdge("g", "isA", "f"), MakeEdge("f", "alternative", "g"),      // 들어오는 종류 · 대안 → 앞의 종류(종류)
+              MakeEdge("f", "zzz", "h"),                                         // 어휘에 없는 종류
+              MakeEdge("f", "solves", "a-u"), MakeEdge("a-u", "improves", "f") },  // 해결 · 들어오는 개선 → 개선. b 와 같아 이름 열쇠 순(Beta < Upsilon)
+            {});
+        GraphLayoutOutput out;
+        QVERIFY(RunLayoutWithFocus(graph, EGraphLayoutType::EGO, QStringLiteral("f"), kEgoDefaultDepth, &out));
+        const QStringList vecExpected { "f", "c", "b", "a-u", "d", "e", "g", "a", "h" };
+        QCOMPARE(ListNodeIds(out), vecExpected);
+        const double dStep = kFullTurn / (vecExpected.size() - 1);
+        for (int iNode = 1; iNode < out.vecNodes.size(); ++iNode)
+        {
+            const double dAngle = GetAngleDegrees(out.vecNodes[0].center, out.vecNodes[iNode].center);
+            QVERIFY2(IsSameAngle(dAngle, kTwelveOClock + (iNode - 1) * dStep), qUtf8Printable(out.vecNodes[iNode].strId + QStringLiteral(" %1").arg(dAngle)));
+        }
+        const QString strCheck = CheckEgoLayout(graph, out, QStringLiteral("f"), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+    }
+
+    // 2 걸음부터: 부모는 앞 고리에서 이어진 점 가운데 그 고리 순서가 가장 앞인 점이다(점 번호가 앞인 A1 이 아니라 개선으로 이어 앞에 온 Z1).
+    // 한 부모의 자식은 점 번호 순(W → X)이고, 쐐기는 잎 수에 비례한다: Z1(잎 2) 240° · A1(잎 1) 120°
+    void egoParentsAndWedges()
+    {
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(
+            { MakeConcept("f", "F"), MakeConcept("z1", "Z1"), MakeConcept("a1", "A1"), MakeConcept("x", "X"), MakeConcept("w", "W") },
+            { MakeEdge("f", "improves", "z1"), MakeEdge("f", "uses", "a1"), MakeEdge("x", "isA", "a1"), MakeEdge("x", "isA", "z1"),
+              MakeEdge("w", "uses", "z1") },
+            {});
+        GraphLayoutOutput out;
+        QVERIFY(RunLayoutWithFocus(graph, EGraphLayoutType::EGO, QStringLiteral("f"), kEgoDefaultDepth, &out));
+        QCOMPARE(ListNodeIds(out), (QStringList { "f", "z1", "a1", "w", "x" }));
+        const QVector<QPair<QString, double>> vecAngles { { "z1", -90 }, { "a1", 90 }, { "w", -150 }, { "x", -30 } };
+        for (const QPair<QString, double>& pairAngle : vecAngles)
+        {
+            const double dAngle = GetAngleDegrees(out.vecNodes[0].center, GetCenter(out, pairAngle.first));
+            QVERIFY2(IsSameAngle(dAngle, pairAngle.second), qUtf8Printable(pairAngle.first + QStringLiteral(" %1").arg(dAngle)));
+        }
+        QCOMPARE(out.vecEdges.size(), graph.GetEdges().size());
+        const QString strCheck = CheckEgoLayout(graph, out, QStringLiteral("f"), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+    }
+
+    // 사슬 f – a – b – c – d 를 깊이 3 으로: 점마다 쐐기가 한 바퀴라 모두 12시이고 d 는 넣지 않는다.
+    // 별(잎 40 이 중심에 닿는다): 한 고리에 다 놓여도 겹치지 않는다
+    void egoChainAndStar()
+    {
+        const KnowledgeGraph chain = KnowledgeGraph::BuildFromParts(
+            { MakeConcept("f", "F"), MakeConcept("a", "A"), MakeConcept("b", "B"), MakeConcept("c", "C"), MakeConcept("d", "D") },
+            { MakeEdge("a", "improves", "f"), MakeEdge("b", "improves", "a"), MakeEdge("c", "improves", "b"), MakeEdge("d", "improves", "c") },
+            {});
+        GraphLayoutOutput out;
+        QVERIFY(RunLayoutWithFocus(chain, EGraphLayoutType::EGO, QStringLiteral("f"), 3, &out));
+        QCOMPARE(ListNodeIds(out), (QStringList { "f", "a", "b", "c" }));
+        for (int iNode = 1; iNode < out.vecNodes.size(); ++iNode)
+            QVERIFY2(IsSameAngle(GetAngleDegrees(out.vecNodes[0].center, out.vecNodes[iNode].center), kTwelveOClock),
+                     qUtf8Printable(out.vecNodes[iNode].strId));
+        QCOMPARE(out.vecEdges.size(), 3);
+        QString strCheck = CheckEgoLayout(chain, out, QStringLiteral("f"), 3);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        QVector<KnowledgeConcept> vecConcepts { MakeConcept("hub", "Hub") };
+        QVector<KnowledgeEdge> vecEdges;
+        for (int iLeaf = 0; iLeaf < kDenseLeafCount; ++iLeaf)
+        {
+            const QString strId = QStringLiteral("leaf-%1").arg(iLeaf, kLeafNumberWidth, kDecimalBase, QLatin1Char('0'));
+            vecConcepts << MakeConcept(strId, strId);
+            vecEdges << MakeEdge(strId, "isA", "hub");
+        }
+        const KnowledgeGraph star = KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {});
+        QCOMPARE(KnowledgeGraphLayout::FindDefaultFocus(star), QString("hub"));
+        QVERIFY(RunLayout(star, EGraphLayoutType::EGO, &out));
+        QCOMPARE(out.vecNodes.size(), 1 + kDenseLeafCount);
+        strCheck = CheckEgoLayout(star, out, QStringLiteral("hub"), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+    }
+
+    // 나무 선과 둘레 선(design/MoreViews.md §6.1 · §7.3): 초점의 선과 점–부모를 잇는 선(방향은 보지 않는다)은 나무 선, 그 밖은 둘레 선(bContext)이다.
+    // 기본 초점은 나무 선 11 · 둘레 선 7, 깊이 1 은 초점의 선 6 · 1 걸음 점끼리 3, 허브(1단계 검출기) 깊이 2 는 13 · 8 이다.
+    // 부모와 자식을 잇는 선이 둘이면 둘 다 나무 선이다. 다른 보기에는 둘레 선이 없다
+    void egoTreeAndContextEdges()
+    {
+        const auto funcSplit = [](const GraphLayoutOutput& out, QStringList* tree, QStringList* context)
+        {
+            for (const LayoutEdge& edge : out.vecEdges)
+                (edge.bContext ? context : tree)->append(DescribeLayoutEdge(out, edge));
+        };
+        const auto funcCompare = [](const QString& what, const QStringList& actual, const QStringList& expected)
+        {
+            const QString strDiff = DiffItems(what, actual, expected);
+            return strDiff.isEmpty() && actual.size() == expected.size() ? QString() : what + QStringLiteral(" %1/%2 ").arg(actual.size()).arg(expected.size()) + strDiff;
+        };
+
+        QStringList vecTree;
+        QStringList vecContext;
+        funcSplit(GetOutput(EGraphLayoutType::EGO), &vecTree, &vecContext);
+        QCOMPARE(kEgoTreeEdgeList.size() + kEgoContextEdgeList.size(), kEgoEdges);
+        QString strCheck = funcCompare(QStringLiteral("tree"), vecTree, kEgoTreeEdgeList) + funcCompare(QStringLiteral("context"), vecContext, kEgoContextEdgeList);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        // 깊이 1: 초점의 선 6 은 나무 선, 1 걸음 점끼리 3 은 둘레 선
+        GraphLayoutOutput shallow;
+        QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, QString(), 1, &shallow));
+        vecTree.clear();
+        vecContext.clear();
+        funcSplit(shallow, &vecTree, &vecContext);
+        constexpr int kFocusEdges = 6;
+        strCheck = funcCompare(QStringLiteral("tree"), vecTree, kEgoEdgeList.mid(0, kFocusEdges))
+                   + funcCompare(QStringLiteral("context"), vecContext, kEgoEdgeList.mid(kFocusEdges, kEgoDepthOneEdges - kFocusEdges));
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        // 허브 초점 깊이 2
+        GraphLayoutOutput hub;
+        QVERIFY(RunLayoutWithFocus(m_graph, EGraphLayoutType::EGO, DecodeUtf8(kHubFocus), kEgoDefaultDepth, &hub));
+        vecTree.clear();
+        vecContext.clear();
+        funcSplit(hub, &vecTree, &vecContext);
+        strCheck = funcCompare(QStringLiteral("tree"), vecTree, kHubTreeEdgeList) + funcCompare(QStringLiteral("context"), vecContext, kHubContextEdgeList);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+        strCheck = CheckEgoLayout(m_graph, hub, DecodeUtf8(kHubFocus), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        // 합성: x 의 부모는 Z1(A1 과의 선은 둘레 선). w–z1 사이 선 둘은 둘 다 나무 선, 1 걸음 점끼리(a1 – z1) · 제 자신으로 가는 선은 둘레 선
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(
+            { MakeConcept("f", "F"), MakeConcept("z1", "Z1"), MakeConcept("a1", "A1"), MakeConcept("x", "X"), MakeConcept("w", "W") },
+            { MakeEdge("f", "improves", "z1"), MakeEdge("f", "uses", "a1"), MakeEdge("x", "isA", "a1"), MakeEdge("x", "isA", "z1"),
+              MakeEdge("w", "uses", "z1"), MakeEdge("z1", "alternative", "w"), MakeEdge("a1", "uses", "z1"), MakeEdge("w", "isA", "w") },
+            {});
+        GraphLayoutOutput synthetic;
+        QVERIFY(RunLayoutWithFocus(graph, EGraphLayoutType::EGO, QStringLiteral("f"), kEgoDefaultDepth, &synthetic));
+        vecTree.clear();
+        vecContext.clear();
+        funcSplit(synthetic, &vecTree, &vecContext);
+        strCheck = funcCompare(QStringLiteral("tree"), vecTree, { "f improves z1", "f uses a1", "x isA z1", "w uses z1", "z1 alternative w" })
+                   + funcCompare(QStringLiteral("context"), vecContext, { "x isA a1", "a1 uses z1", "w isA w" });
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+        strCheck = CheckEgoLayout(graph, synthetic, QStringLiteral("f"), kEgoDefaultDepth);
+        QVERIFY2(strCheck.isEmpty(), qUtf8Printable(strCheck));
+
+        // 다른 보기는 둘레 선을 쓰지 않는다
+        for (const EGraphLayoutType eType : kAllTypes)
+            if (eType != EGraphLayoutType::EGO)
+                for (const LayoutEdge& edge : GetOutput(eType).vecEdges)
+                    QVERIFY2(!edge.bContext, qUtf8Printable(GetTypeName(eType)));
+    }
+
+    // 다른 전략은 초점 · 깊이 칸을 보지 않는다: 그 칸을 채워도 출력이 비트까지 같다
+    void otherLayoutsIgnoreFocusInput()
+    {
+        for (const EGraphLayoutType eType : kAllTypes)
+        {
+            if (eType == EGraphLayoutType::EGO)
+                continue;
+            for (const QPair<QString, int>& pairInput : QVector<QPair<QString, int>> { { QStringLiteral("yolo"), 5 }, { DecodeUtf8(kEdgelessConcept), 0 } })
+            {
+                GraphLayoutOutput out;
+                QVERIFY(RunLayoutWithFocus(m_graph, eType, pairInput.first, pairInput.second, &out));
+                QVERIFY2(DescribeLayout(out) == DescribeLayout(GetOutput(eType)), qUtf8Printable(GetTypeName(eType)));
+            }
+        }
     }
 
 private:

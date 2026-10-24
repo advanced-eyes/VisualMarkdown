@@ -19,8 +19,9 @@ class QTreeWidgetItem;
 class VisualMarkdownViewerChartPage;
 class VisualMarkdownViewerMatrixPage;
 
-// 보기 앱 창(design/Views.md §8). 왼쪽 나무(지식 사이 보기 6개 · 지식 안 문서 → 표)에서 고른 보기를 오른쪽에 보인다.
+// 보기 앱 창(design/Views.md §8). 왼쪽 나무(지식 사이 보기 7개 · 지식 안 문서 → 표)에서 고른 보기를 오른쪽에 보인다.
 // 도구 막대: 폴더 열기 · 어둠(밝음/어둠) · 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수(경고는 마우스 올림으로 목록), 고른 개념.
+// 어느 그래프 보기에서든 점을 누르면 이웃 보기의 초점을 그 개념으로 옮긴다(나무의 이웃 글도 고친다, design/MoreViews.md §6.2).
 // 화면 로직은 VisualMarkdownViewerModel 이 맡고, 창은 고른 것을 쪽에 넣고 보인다.
 class VisualMarkdownViewerWindow : public QMainWindow
 {
@@ -77,6 +78,7 @@ private slots:
     void ChooseFolder();
     void HandleCurrentItemChanged(QTreeWidgetItem* current);   // 나무에서 고른 항목의 쪽을 보인다
     void HandleConceptActivated(const QString& conceptId);
+    void RefreshEgoView();   // 이웃 보기를 보고 있고 배치를 버렸으면 새 초점으로 다시 넣는다(ConceptActivated 뒤 다음 이벤트 차례에 타이머로 부른다)
     void HandleDocumentActivated(const QString& documentId);
     void HandleChartTypeChosen(int choice);
 

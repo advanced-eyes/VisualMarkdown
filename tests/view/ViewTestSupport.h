@@ -155,6 +155,7 @@ inline QString GetLayoutName(EGraphLayoutType type)
     case EGraphLayoutType::TIMELINE: return QStringLiteral("timeline");
     case EGraphLayoutType::MATRIX: return QStringLiteral("matrix");
     case EGraphLayoutType::BIPARTITE: return QStringLiteral("bipartite");
+    case EGraphLayoutType::EGO: return QStringLiteral("ego");
     }
     return QStringLiteral("unknown");
 }

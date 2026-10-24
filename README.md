@@ -3,7 +3,7 @@
 마크다운 파일을 그래프로 볼 수 있게 하는 **파일 규칙**과, 그 규칙대로 읽고 쓰는 **Qt5 C++ 라이브러리**. Ocean 의 지식 형식(형식 1판)에서 떼어 낸다. Ocean 은 이 저장소를 git 서브모듈로 붙여 쓴다.
 
 - 작성일: 2026-10-23
-- 상태: 1–3단계와 보기(5 · 6단계)를 했다. 4단계(저장 API)가 남았다. Ocean main 에 서브모듈로 붙었다(66f0877, §7).
+- 상태: 1–3단계와 보기(5 · 6단계), 보기 더하기(7단계: 히트맵 · 도넛 · 이웃)를 했다. 4단계(저장 API)가 남았다. Ocean main 에 서브모듈로 붙었다(66f0877, §7).
 - 원격: [github.com/advanced-eyes/VisualMarkdown](https://github.com/advanced-eyes/VisualMarkdown)
 - 바탕: Ocean [지식 형식 스펙](../Ocean/docs/superpowers/specs/2026-10-22-knowledge-format-design.md) §1–§4(계획 ② 반영본)와 Ocean `main` 6d539cc 의 `src/Document/Knowledge/*`. 스펙과 코드가 다른 곳은 코드를 따랐다.
 
@@ -11,7 +11,7 @@
 
 - 보통 마크다운이다. VS Code · GitHub · Obsidian 에서 그냥 읽히고, 링크를 눌러 옮겨 다닌다.
 - 정해진 자리(머리글 · 정해진 절 · 줄 문법 · HTML 주석)를 읽으면 그래프가 된다. 시각화는 두 층이다.
-  - **지식 사이**: 개념 파일 = 점, 관계 줄 = 선 → 관계망 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념
+  - **지식 사이**: 개념 파일 = 점, 관계 줄 = 선 → 관계망 · 이웃 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념
   - **지식 안**: `ocean:data` 주석이 붙은 표 → 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛
 - 데이터와 보기를 떼어 놓는다. 점 위치 · 색 · 고른 차트는 파일에 넣지 않는다. 보기는 늘어나도 데이터 규칙은 하나다.
 - 손으로 고쳐도 된다. 모르는 글 · 절 · 머리글 키는 다시 쓸 때 그대로 남는다.
@@ -37,7 +37,8 @@ VisualMarkdown/
 │   ├── wiki/              정준 예시(Ocean 이 쓰는 모양 그대로). 형식 문서에 붙은 테스트 픽스처  (1단계)
 │   └── showcase/          모든 보기를 시험하는 예시 wiki(문서 6 · 개념 32)와 보기마다의 기대값
 ├── design/
-│   └── Views.md           보기 설계(5 · 6단계): 색인 · 배치 · 차트 · 위젯 · 보기 앱
+│   ├── Views.md           보기 설계(5 · 6단계): 색인 · 배치 · 차트 · 위젯 · 보기 앱
+│   └── MoreViews.md       보기 더하기(7단계): 더할 그래프 조사, 히트맵 · 도넛 · 이웃 설계
 ├── docs/                  코드 규칙. Ocean docs/ 에서 복사                              (1단계)
 │   ├── CppConvention.md
 │   ├── Qt.md
@@ -78,8 +79,9 @@ ctest --test-dir build
 ```
 
 - 폴더를 주지 않으면 [examples/showcase/wiki](examples/showcase/wiki/)를 연다.
-- 창: 왼쪽 나무에서 지식 사이 보기 6가지와 문서 → 표를 고른다. 차트 쪽에는 원래 표가 함께 보이고, 차트 종류를 바꿀 수 있다(추천 · 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛). 차트로 그리지 않는 표는 그 까닭과 표를 보인다. 도구 막대: 폴더 열기 · 밝음/어둠 · 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수.
-- 스냅샷(`--snapshot`): 화면 없이 보기 6개(`graph-network.png` 등)와 표마다의 차트(`chart-DD-TT.png`, DD 는 문서 목록 순 · TT 는 문서 안 표 순)를 PNG 로 남기고, 무엇을 찍었는지 `snapshot.tsv` 에 적고 끝난다. 끝 코드: 0 성공, 2 잘못된 인자, 3 wiki 를 읽지 못함, 4 파일을 못 씀.
+- 창: 왼쪽 나무에서 지식 사이 보기 7가지와 문서 → 표를 고른다. 차트 쪽에는 원래 표가 함께 보이고, 차트 종류를 바꿀 수 있다(추천 · 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛). 차트로 그리지 않는 표는 그 까닭과 표를 보인다. 도구 막대: 폴더 열기 · 밝음/어둠 · 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수.
+- 이웃(나무의 둘째, `이웃 · {초점 이름}`): 한 개념(초점) 둘레를 두 걸음까지 동심원으로 보인다. 처음에는 선이 가장 많은 개념이 초점이고, 어느 보기에서든 점을 누르면 그 개념으로 옮겨 간다(이웃 보기 안에서 누르면 바로 다시 배치한다).
+- 스냅샷(`--snapshot`): 화면 없이 보기 7개(`graph-network.png` · `graph-ego.png` 등. 이웃은 기본 초점)와 표마다의 차트(`chart-DD-TT.png`, DD 는 문서 목록 순 · TT 는 문서 안 표 순)를 PNG 로 남기고, 무엇을 찍었는지 `snapshot.tsv` 에 적고 끝난다. 끝 코드: 0 성공, 2 잘못된 인자, 3 wiki 를 읽지 못함, 4 파일을 못 씀.
 - `ctest` 는 코어 · 위젯 · 보기 앱 시험과, showcase 스냅샷을 찍어 `tests/viewer/showcase-snapshot.tsv` 와 견주는 시험을 돈다.
 
 ## 4. 출처 대응
@@ -108,7 +110,7 @@ ctest --test-dir build
 | 1. 형식 | `KnowledgeTypes.h` · `KnowledgeVocabulary.*`(+ `vocabulary.json`) · `KnowledgeMarkdownLayout.*` · `KnowledgeText.*` · `KnowledgeMarkdownReader.*` · `KnowledgeMarkdownWriter.*`. 로직은 그대로 옮긴다 | QtCore | 2단계 |
 | 1+. 이름 정리 | 기록을 파일 문법에 맞추는 규칙: 이름 · 별칭 · 열 이름의 쉼표 → ` · `, 단위의 괄호 빼기, 이름 끝 ` (…)` 를 단위로 옮기기, 겹친 열 이름에 ` 2` · ` 3`(`x` · `y` · `series` · `ordered` 가 따라간다). `KnowledgeText::CleanName` · `CleanNames` · `CleanColumns`. Ocean `KnowledgeExtractionValidator.cpp` 53–60 · 100–158줄에서 옮겼다 | QtCore | 2단계 |
 | 2. 저장소 · 색인 | 읽기 전용 색인 `KnowledgeIndex`(보기가 쓴다). `KnowledgeBase` 의 AI 와 상관없는 부분(§5.3) | QtCore | 색인은 5단계에서 먼저 — 끝. 저장은 4단계 |
-| 3. 보기 모델 | 그래프 모델 · 배치 6가지(`KnowledgeGraph` · `KnowledgeGraphLayout`), 차트 설정(`KnowledgeChartBuilder`: 열 종류 → 축 · 계열 · 추천 차트) | QtCore | 5단계 — 끝 |
+| 3. 보기 모델 | 그래프 모델 · 배치 7가지(`KnowledgeGraph` · `KnowledgeGraphLayout`), 차트 설정(`KnowledgeChartBuilder`: 열 종류 → 축 · 계열 · 추천 차트) | QtCore | 5단계 — 끝 |
 | 4. 위젯 | 그래프 · 행렬 · 차트 위젯(`QPainter`)과 테마. 별도 타깃 `VisualMarkdownView` | QtWidgets | 6단계 — 끝 |
 
 - 1+ 를 라이브러리에 두는 까닭: AI 검사기에만 있으면, 다른 경로로 만든 기록(손 도구 · 다른 앱)은 쓰고 다시 읽으면 달라진다(별칭의 쉼표에서 둘로 나뉘는 등). Ocean 검사기는 3단계부터 라이브러리의 이 함수를 부른다.
@@ -224,6 +226,7 @@ Ocean/
 | 4 | 2층: `KnowledgeBase` 를 나눠 라이브러리로 옮기고 저장 API 를 바꾼다. Ocean 에 어댑터를 만든다(§5.3) | 두 쪽 테스트 통과, §5.4 기준 |
 | 5 | 3층 보기 모델(그래프 배치 6가지 · 차트 설정)과 2층 읽기 색인 `KnowledgeIndex`([design/Views.md](design/Views.md) §4–§6) | showcase 기대값 시험 통과 — 끝(`VisualMarkdownTests` 10개 클래스 245개) |
 | 6 | 4층 위젯(별도 타깃 `VisualMarkdownView`)과 보기 앱 `VisualMarkdownViewer`(§3.1, design/Views.md §7 · §8) | 위젯 · 보기 앱 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownViewTests` 4개 클래스 128개, `VisualMarkdownViewerTests` 4개 클래스 53개, ctest 5개) |
+| 7 | 보기 더하기([design/MoreViews.md](design/MoreViews.md)): 더할 그래프를 조사해 고른 셋 — 히트맵 · 도넛(지식 안), 이웃(지식 사이). showcase 에 YOLOv3 표 3 을 더했다 | 셋마다 구현 → 리뷰, 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownTests` 10개 클래스 271개, `VisualMarkdownViewTests` 4개 175개, `VisualMarkdownViewerTests` 4개 57개, ctest 5개, 스냅샷 PNG 20장) |
 
 - 서브모듈 붙이기(3)를 `KnowledgeBase` 나누기(4)보다 먼저 한다. Ocean 어댑터가 라이브러리의 `UpsertConcept` · `SaveDocument` 를 부르려면 라이브러리가 먼저 붙어 있어야 한다. 단계마다 두 쪽 테스트가 모두 통과한 채로 끝난다.
 - 보기(5 · 6단계)는 4단계보다 먼저 했다. 보기는 읽기만 쓰므로 저장 API 를 기다리지 않는다. 읽기 색인 `KnowledgeIndex` 는 5단계에서 만들었다(§5.3).
@@ -254,7 +257,7 @@ Ocean/
 
 ## 10. 정하지 않은 것
 
-- 보기 정보(점 위치 · 색 · 고른 차트)를 둘 곳. 보기 6가지와 차트 규칙은 [design/Views.md](design/Views.md)에서 정했다("제안" 으로 표시한 결정은 고칠 수 있다).
+- 보기 정보(점 위치 · 색 · 고른 차트)를 둘 곳. 보기 7가지와 차트 규칙은 [design/Views.md](design/Views.md) · [design/MoreViews.md](design/MoreViews.md)에서 정했다("제안" 으로 표시한 결정은 고칠 수 있다).
 - 여러 문서의 표 행을 모아 비교하는 규칙
 - Obsidian 위키 링크(`[[YOLO]]`). 지금은 표준 링크만 읽는다. 카드의 `개념:` 줄에 쓰면 다시 쓸 때 사라진다.
 - Ocean 계획 ② 의 남은 백로그: 표 머리 줄 뒤의 `ocean:data` 주석, 주석만 있는 `###` 블록, 인용 속 공백으로 묶은 숫자, `#태그` 로 시작하는 한 줄, 여러 줄 `<!--` 주석([ReadWrite.md §8](format/ReadWrite.md#8-알려진-한계))

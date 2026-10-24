@@ -249,6 +249,22 @@ ImprovesGroups BuildImprovesGroups(const KnowledgeGraph& graph)
     return groups;
 }
 
+int FindDefaultFocus(const KnowledgeGraph& graph)
+{
+    // 앞에서부터 보며 더 나은 점만 고르므로, 같으면 점 번호가 앞인 점이 남는다
+    const QVector<KnowledgeGraphNode>& vecNodes = graph.GetNodes();
+    int iBest = -1;
+    for (int iNode = 0; iNode < vecNodes.size(); ++iNode)
+    {
+        if (iBest >= 0 && vecNodes[iNode].iEdgeCount < vecNodes[iBest].iEdgeCount)
+            continue;
+        if (iBest >= 0 && vecNodes[iNode].iEdgeCount == vecNodes[iBest].iEdgeCount && vecNodes[iNode].iDocumentCount <= vecNodes[iBest].iDocumentCount)
+            continue;
+        iBest = iNode;
+    }
+    return iBest;
+}
+
 QRectF MakeNodeBox(const QPointF& center)
 {
     return QRectF(center.x() - GraphLayoutSize::kNodeWidth / 2, center.y() - GraphLayoutSize::kNodeHeight / 2,

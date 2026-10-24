@@ -48,11 +48,12 @@ Ocean `KnowledgeBase` 의 `ListRelations` · `ListKnownConcepts` 가 주던 것�
 
 ## 3. 지식 사이 보기가 쓸 수 있는 칸
 
-보기 6가지와, 각 보기가 읽는 칸이다. 보기마다의 배치는 [design/Views.md §5](../design/Views.md#5-그래프-배치)에서 정했다.
+보기 7가지와, 각 보기가 읽는 칸이다. 보기마다의 배치는 [design/Views.md §5](../design/Views.md#5-그래프-배치)에서 정했다(이웃은 [design/MoreViews.md §6](../design/MoreViews.md)).
 
 | 보기 | 쓰는 칸 |
 | --- | --- |
 | 관계망 | 점: 개념 · `kind`(묶기 · 모양). 선: 관계 종류 · 방향 · 상태(AI 제안은 흐리게 등) |
+| 이웃 | 초점 개념 하나에서 관계를 방향 없이 따라간 걸음 수(보기 앱은 2 걸음까지), 1 걸음 점의 순서는 초점과 잇는 관계의 종류 · 방향. 기본 초점은 이어진 관계 수 · 다루는 문서 수. 점 · 선은 관계망과 같은 칸 |
 | 계보도 | `improves`(새것 → 옛것), `year` |
 | 분류 트리 | `isA`(하위 → 상위). 계열 · 분류는 따로 칸이 없고 이 관계에서 나온다 |
 | 타임라인 | `year`, 갈래는 `isA` · `improves` |

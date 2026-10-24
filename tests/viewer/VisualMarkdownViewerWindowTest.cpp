@@ -29,7 +29,7 @@ const QSize kSmallWindowSize(720, 520);   // 관계 행렬(31 × 31)이 가장 �
 // 나무(문서 목록 순: learned 늦은 것부터)
 constexpr const char* kBetweenTitle = "지식 사이";
 constexpr const char* kWithinTitle = "지식 안";
-const QStringList kViewLabels { "관계망", "계보도", "분류 트리", "타임라인", "관계 행렬", "문서 ↔ 개념" };
+const QStringList kViewLabels { "관계망", "이웃 · Faster R-CNN", "계보도", "분류 트리", "타임라인", "관계 행렬", "문서 ↔ 개념" };   // 이웃은 초점 이름이 붙는다
 const QStringList kDocumentTitles { "결제 서비스 개편 기획서", "Focal Loss for Dense Object Detection", "2단계 검출기의 흐름",
                                     "YOLOv3: An Incremental Improvement", "YOLO9000: Better, Faster, Stronger",
                                     "You Only Look Once: Unified, Real-Time Object Detection" };
@@ -49,6 +49,15 @@ constexpr const char* kYoloFile = "documents/you-only-look-once-unified-real-tim
 
 const QString kCountsText = QStringLiteral("점 31 · 선 36 · 문서 6 · 빠진 관계 1");
 const QString kNoWarningsText = QStringLiteral("경고 0");
+
+// 이웃 보기의 초점(design/MoreViews.md §6.2): 기본 초점 Faster R-CNN, 누르면 그 개념으로 옮겨 간다
+constexpr const char* kDefaultFocus = "faster-r-cnn";
+constexpr const char* kDefaultFocusTitle = "이웃 · Faster R-CNN";
+constexpr const char* kYoloId = "yolo";
+constexpr const char* kYoloFocusTitle = "이웃 · YOLO";
+constexpr const char* kYoloStatus = "YOLO · 방법 · 2016";
+constexpr const char* kYolov2Id = "yolov2";
+constexpr const char* kYolov2FocusTitle = "이웃 · YOLOv2";
 
 QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
 
@@ -97,7 +106,7 @@ private slots:
         m_upWindow.reset();
     }
 
-    // 나무: "지식 사이" 아래 보기 6개, "지식 안" 아래 문서(문서 목록 순)와 그 아래 표(표 제목, 뒤에 차트 종류).
+    // 나무: "지식 사이" 아래 보기 7개(이웃은 관계망 다음, 이름에 초점이 붙는다), "지식 안" 아래 문서(문서 목록 순)와 그 아래 표(표 제목, 뒤에 차트 종류).
     // 표가 없는 문서도 보이되 고를 표가 없다고 알린다. 머리 항목은 고르지 않는다
     void treeListsViewsDocumentsAndTables()
     {
@@ -148,7 +157,7 @@ private slots:
         QVERIFY2(window.GetDocumentPage()->text().contains(DecodeUtf8(kNoTableText)), qUtf8Printable(window.GetDocumentPage()->text()));
     }
 
-    // 나무 항목을 고르면 그 쪽이 보인다: 그래프 보기 5개는 KnowledgeGraphView, 관계 행렬은 행렬 쪽, 표는 차트 쪽, 문서는 문서 쪽.
+    // 나무 항목을 고르면 그 쪽이 보인다: 그래프 보기 6개는 KnowledgeGraphView, 관계 행렬은 행렬 쪽, 표는 차트 쪽, 문서는 문서 쪽.
     // 처음에는 관계망이 보이고, 배치는 보기를 처음 열 때 계산한다. 맞춤은 그래프 보기에서만 켜진다
     void selectingItemShowsItsPage()
     {
@@ -183,7 +192,7 @@ private slots:
             QVERIFY2(pView->GetNodeRect(iNodes).isEmpty(), qUtf8Printable(strName));
             QVERIFY2(window.GetFitAction()->isEnabled(), qUtf8Printable(strName));
         }
-        // 그래프 보기 5개는 저마다 따로 있는 위젯이다
+        // 그래프 보기 6개는 저마다 따로 있는 위젯이다
         QSet<KnowledgeGraphView*> setViews;
         for (const EGraphLayoutType eType : VisualMarkdownViewerModel::ListViews())
             if (eType != EGraphLayoutType::MATRIX)
@@ -247,7 +256,112 @@ private slots:
         QCOMPARE(window.GetTree()->currentItem(), window.FindViewItem(EGraphLayoutType::NETWORK));   // 보기는 그대로
     }
 
-    // 밝음/어둠: 모든 보기(그래프 5 · 행렬 · 차트)의 테마와 창 팔레트(바탕 · 글자 · 표)가 바뀐다. 아직 열지 않은 보기도, 이미 연 보기도
+    // 다른 보기에서 점을 누르면(ConceptActivated) 상태 줄과 함께 이웃 보기의 초점이 그 개념으로 바뀐다(design/MoreViews.md §6.2).
+    // 나무의 이웃 글이 따라가고 이웃 배치를 버린다. 이웃 보기를 보고 있지 않으면 다시 배치하지 않고, 열 때 새 초점으로 배치해 보인다
+    void conceptActivatedSetsEgoFocus()
+    {
+        VisualMarkdownViewerWindow& window = *m_upWindow;
+        const VisualMarkdownViewerModel& model = window.GetModel();
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kDefaultFocus));
+        QCOMPARE(window.FindViewItem(EGraphLayoutType::EGO)->text(0), DecodeUtf8(kDefaultFocusTitle));
+        window.SelectView(EGraphLayoutType::EGO);   // 기본 초점으로 한 번 연다
+        QVERIFY(model.HasLayout(EGraphLayoutType::EGO));
+        window.SelectView(EGraphLayoutType::NETWORK);
+        KnowledgeGraphView* pNetwork = window.GetGraphView(EGraphLayoutType::NETWORK);
+        QTRY_VERIFY(pNetwork->isVisible() && pNetwork->width() > ViewTestSupport::kSnapshotWidth / 2);
+        const int iNode = FindLayoutNode(GetOpenedLayout(window, EGraphLayoutType::NETWORK), DecodeUtf8(kYoloId), false);
+        QVERIFY(iNode >= 0);
+        QTest::mouseClick(pNetwork, Qt::LeftButton, Qt::NoModifier, pNetwork->GetNodeRect(iNode).center().toPoint());
+        QCOMPARE(window.GetConceptLabel()->text(), DecodeUtf8(kYoloStatus));
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kYoloId));
+        QCOMPARE(window.FindViewItem(EGraphLayoutType::EGO)->text(0), DecodeUtf8(kYoloFocusTitle));
+        QVERIFY(!model.HasLayout(EGraphLayoutType::EGO));
+        QCoreApplication::processEvents();
+        QVERIFY(!model.HasLayout(EGraphLayoutType::EGO));   // 이웃 보기를 보고 있지 않으니 다시 배치하지 않는다
+        QCOMPARE(window.GetStack()->currentWidget(), pNetwork);
+        QCOMPARE(window.GetTree()->currentItem(), window.FindViewItem(EGraphLayoutType::NETWORK));
+
+        window.SelectView(EGraphLayoutType::EGO);
+        KnowledgeGraphView* pEgo = window.GetGraphView(EGraphLayoutType::EGO);
+        QCOMPARE(window.GetStack()->currentWidget(), pEgo);
+        QTRY_VERIFY(pEgo->isVisible() && pEgo->width() > ViewTestSupport::kSnapshotWidth / 2);
+        const GraphLayoutOutput& layout = GetOpenedLayout(window, EGraphLayoutType::EGO);
+        QCOMPARE(layout.vecNodes.first().strId, DecodeUtf8(kYoloId));
+        QVERIFY(layout.vecNodes.first().bFocus);
+        QCOMPARE(pEgo->FindConceptAt(pEgo->MapToWidget(layout.vecNodes.first().center).toPoint()), DecodeUtf8(kYoloId));
+        QVERIFY(!pEgo->GetNodeRect(layout.vecNodes.size() - 1).isEmpty());
+        QVERIFY(pEgo->GetNodeRect(layout.vecNodes.size()).isEmpty());   // 새 배치를 받았다
+    }
+
+    // 이웃 보기 안에서 점을 누르면 그 점으로 옮겨 간다: 누르기를 마친 뒤 바로 다시 배치해 맞춰 보인다. 나무 글 · 상태 줄도 따라간다.
+    // 초점 점을 다시 누르면 배치는 그대로 두고 고르기만 한다. 잇달아 눌러도(다시 배치하기 전에) 마지막에 누른 점으로 간다
+    void clickInsideEgoViewMovesFocus()
+    {
+        VisualMarkdownViewerWindow& window = *m_upWindow;
+        const VisualMarkdownViewerModel& model = window.GetModel();
+        window.SelectView(EGraphLayoutType::EGO);
+        KnowledgeGraphView* pEgo = window.GetGraphView(EGraphLayoutType::EGO);
+        QTRY_VERIFY(pEgo->isVisible() && pEgo->width() > ViewTestSupport::kSnapshotWidth / 2);
+        const GraphLayoutOutput before = GetOpenedLayout(window, EGraphLayoutType::EGO);   // 사본: 버린 배치를 가리키지 않게
+        QCOMPARE(before.vecNodes.first().strId, DecodeUtf8(kDefaultFocus));
+        QCOMPARE(pEgo->FindConceptAt(pEgo->MapToWidget(before.vecNodes.first().center).toPoint()), DecodeUtf8(kDefaultFocus));
+
+        const int iYolo = FindLayoutNode(before, DecodeUtf8(kYoloId), false);
+        QVERIFY(iYolo > 0);
+        QTest::mouseClick(pEgo, Qt::LeftButton, Qt::NoModifier, pEgo->GetNodeRect(iYolo).center().toPoint());
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kYoloId));
+        QCOMPARE(window.FindViewItem(EGraphLayoutType::EGO)->text(0), DecodeUtf8(kYoloFocusTitle));
+        QCOMPARE(window.GetConceptLabel()->text(), DecodeUtf8(kYoloStatus));
+        QTRY_VERIFY(model.HasLayout(EGraphLayoutType::EGO));
+        const GraphLayoutOutput after = GetOpenedLayout(window, EGraphLayoutType::EGO);
+        QCOMPARE(after.vecNodes.first().strId, DecodeUtf8(kYoloId));
+        QTRY_COMPARE(pEgo->FindConceptAt(pEgo->MapToWidget(after.vecNodes.first().center).toPoint()), DecodeUtf8(kYoloId));
+        QCOMPARE(pEgo->GetSelectedId(), QString());   // 새 배치라 고른 것이 없다
+        QCOMPARE(window.GetStack()->currentWidget(), pEgo);
+        QCOMPARE(window.GetTree()->currentItem(), window.FindViewItem(EGraphLayoutType::EGO));
+        const QRectF rectView(pEgo->rect());
+        for (int iNode = 0; iNode < after.vecNodes.size(); ++iNode)
+            QVERIFY2(rectView.contains(pEgo->GetNodeRect(iNode)), qUtf8Printable(after.vecNodes[iNode].strId));   // 맞춰 보인다
+        QVERIFY(pEgo->GetNodeRect(after.vecNodes.size()).isEmpty());
+
+        // 초점 점을 누르면: 초점 · 배치는 그대로, 그 점을 고른다(다시 배치하면 고른 것이 지워진다)
+        QTest::mouseClick(pEgo, Qt::LeftButton, Qt::NoModifier, pEgo->GetNodeRect(0).center().toPoint());
+        QCoreApplication::processEvents();
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kYoloId));
+        QCOMPARE(pEgo->GetSelectedId(), DecodeUtf8(kYoloId));
+
+        // 잇달아 두 점을 누른다(첫 누르기의 다시 배치가 아직 돌지 않았다): 마지막에 누른 YOLOv2 로 간다
+        const int iYolov2 = FindLayoutNode(after, DecodeUtf8(kYolov2Id), false);
+        const int iFocusAgain = FindLayoutNode(after, DecodeUtf8(kDefaultFocus), false);
+        QVERIFY(iYolov2 > 0 && iFocusAgain > 0);
+        QTest::mouseClick(pEgo, Qt::LeftButton, Qt::NoModifier, pEgo->GetNodeRect(iFocusAgain).center().toPoint());
+        QTest::mouseClick(pEgo, Qt::LeftButton, Qt::NoModifier, pEgo->GetNodeRect(iYolov2).center().toPoint());
+        QCOMPARE(model.GetFocusConcept(), DecodeUtf8(kYolov2Id));
+        QTRY_VERIFY(model.HasLayout(EGraphLayoutType::EGO) && model.FindLayout(EGraphLayoutType::EGO)->vecNodes.first().strId == DecodeUtf8(kYolov2Id));
+        QTRY_COMPARE(pEgo->FindConceptAt(pEgo->MapToWidget(GetOpenedLayout(window, EGraphLayoutType::EGO).vecNodes.first().center).toPoint()),
+                     DecodeUtf8(kYolov2Id));
+        QCOMPARE(window.FindViewItem(EGraphLayoutType::EGO)->text(0), DecodeUtf8(kYolov2FocusTitle));
+    }
+
+    // 다른 wiki 를 열면(같은 wiki 를 다시 읽어도) 초점은 기본 초점으로 돌아간다. 나무 글도 따라간다
+    void reopenResetsEgoFocus()
+    {
+        VisualMarkdownViewerWindow& window = *m_upWindow;
+        KnowledgeGraphView* pNetwork = window.GetGraphView(EGraphLayoutType::NETWORK);
+        QTRY_VERIFY(pNetwork->isVisible() && pNetwork->width() > ViewTestSupport::kSnapshotWidth / 2);
+        const int iNode = FindLayoutNode(GetOpenedLayout(window, EGraphLayoutType::NETWORK), DecodeUtf8(kYoloId), false);
+        QVERIFY(iNode >= 0);
+        QTest::mouseClick(pNetwork, Qt::LeftButton, Qt::NoModifier, pNetwork->GetNodeRect(iNode).center().toPoint());
+        QCOMPARE(window.GetModel().GetFocusConcept(), DecodeUtf8(kYoloId));
+        window.SelectView(EGraphLayoutType::EGO);
+        QVERIFY(window.OpenWiki(ViewerTestSupport::GetShowcaseDir()));
+        QCOMPARE(window.GetModel().GetFocusConcept(), DecodeUtf8(kDefaultFocus));
+        QCOMPARE(window.FindViewItem(EGraphLayoutType::EGO)->text(0), DecodeUtf8(kDefaultFocusTitle));
+        QCOMPARE(window.GetTree()->currentItem(), window.FindViewItem(EGraphLayoutType::EGO));   // 보던 보기를 그대로 고른다
+        QCOMPARE(GetOpenedLayout(window, EGraphLayoutType::EGO).vecNodes.first().strId, DecodeUtf8(kDefaultFocus));
+    }
+
+    // 밝음/어둠: 모든 보기(그래프 6 · 행렬 · 차트)의 테마와 창 팔레트(바탕 · 글자 · 표)가 바뀐다. 아직 열지 않은 보기도, 이미 연 보기도
     void themeAppliesToEveryView()
     {
         VisualMarkdownViewerWindow& window = *m_upWindow;

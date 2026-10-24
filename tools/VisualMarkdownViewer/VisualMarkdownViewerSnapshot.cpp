@@ -92,7 +92,7 @@ int VisualMarkdownViewerSnapshot::Run(const VisualMarkdownViewerOptions& options
     QStringList vecRows { MakeRow(kListHeader) };
     bool bWritten = true;
 
-    // 지식 사이 보기 6개: 그래프 보기 5개는 KnowledgeGraphView, 관계 행렬은 행렬 쪽(스크롤 영역)
+    // 지식 사이 보기 7개: 그래프 보기 6개는 KnowledgeGraphView, 관계 행렬은 행렬 쪽(스크롤 영역). 이웃은 기본 초점으로 찍는다
     for (const EGraphLayoutType eType : VisualMarkdownViewerModel::ListViews())
     {
         const GraphLayoutOutput& layout = model.GetLayout(eType);

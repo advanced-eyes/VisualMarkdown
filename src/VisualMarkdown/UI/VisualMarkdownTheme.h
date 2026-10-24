@@ -64,6 +64,7 @@ public:
     QHash<QString, QColor> hashRelationColors;
     QColor unknownRelation;
     QColor confirmedSample;          // 범례에서 확인됨 · AI 제안 선 모양을 보이는 중립 색
+    double dContextOpacity = 0.45;               // 이웃 보기의 둘레 선(LayoutEdge::bContext): 선 · 화살촉을 이 불투명도로 흐리게(나무 선이 뼈대로 보이게)
     double dProposedFade = 0.45;                 // 0 이면 그대로, 1 이면 바탕 색
     QVector<qreal> vecProposedDash { 4, 3 };     // 점선 무늬(선 굵기 단위): 4 칠하고 3 비운다
     QColor bipartiteLink;            // 문서 ↔ 개념 선(중립 회색, 굵기가 무게)

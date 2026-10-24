@@ -5,9 +5,12 @@
 #include "VisualMarkdown/UI/VisualMarkdownTheme.h"
 #include "ViewTestSupport.h"
 
+#include <QLineF>
+#include <QPolygonF>
 #include <QSignalSpy>
 #include <QTest>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -19,7 +22,30 @@ namespace
 
 const QVector<EGraphLayoutType> kGraphTypes {
     EGraphLayoutType::NETWORK, EGraphLayoutType::LINEAGE, EGraphLayoutType::TREE, EGraphLayoutType::TIMELINE, EGraphLayoutType::BIPARTITE,
+    EGraphLayoutType::EGO,
 };
+
+// 이웃 보기(design/MoreViews.md §6.2): 기본 초점 Faster R-CNN 은 테두리가 두 배이고 이름이 굵다. 그림이 달라지는 곳은 초점 상자 둘레뿐이다
+constexpr const char* kEgoFocusId = "faster-r-cnn";
+constexpr const char* kEgoRingOneId = "yolo";   // 1 걸음 점(누르면 관계망처럼 고르고 시그널을 낸다)
+constexpr int kFocusMargin = 4;                 // 초점 상자에서 이만큼(px) 밖까지가 테두리 띠, 이만큼 안부터가 글자 칸이다
+constexpr int kEgoContextEdges = 7;             // 기본 초점의 둘레 선(design/MoreViews.md §7.3)
+constexpr double kEdgeMargin = 4;               // 선(꺾은선 · 화살촉)에서 이만큼(px) 안이 그 선이 칠하는 자리다
+constexpr double kMaxContextInkShare = 0.8;     // 둘레 선 자리의 잉크(바탕과의 색 거리 합)는 나무 선으로 그린 것의 이만큼보다 적다
+
+// 점에서 꺾은선까지의 거리
+double GetDistanceToPolyline(const QPointF& point, const QPolygonF& line)
+{
+    double dBest = qInf();
+    for (int iPoint = 1; iPoint < line.size(); ++iPoint)
+    {
+        const QPointF ptSegment = line[iPoint] - line[iPoint - 1];
+        const double dLengthSquared = QPointF::dotProduct(ptSegment, ptSegment);
+        const double dT = dLengthSquared > 0 ? qBound(0.0, QPointF::dotProduct(point - line[iPoint - 1], ptSegment) / dLengthSquared, 1.0) : 0.0;
+        dBest = qMin(dBest, QLineF(point, line[iPoint - 1] + ptSegment * dT).length());
+    }
+    return dBest;
+}
 
 // 점 하나: YOLOv2(방법, 2017, 문서 2개)
 constexpr const char* kYolov2Id = "yolov2";
@@ -99,8 +125,8 @@ QString RemoveSpaces(const QString& text)
 }
 }
 
-// 지식 사이 보기 위젯(KnowledgeGraphView, design/Views.md §7)을 showcase 의 배치 5가지로 시험한다(offscreen).
-// 그리기(비지 않음 · 두 번 그리면 같음 · 테마), 맞춤, 위치로 찾기, 누르기 · 휠 · 끌기, 마우스 올림 설명.
+// 지식 사이 보기 위젯(KnowledgeGraphView, design/Views.md §7)을 showcase 의 배치 6가지(이웃 포함)로 시험한다(offscreen).
+// 그리기(비지 않음 · 두 번 그리면 같음 · 테마), 맞춤, 위치로 찾기, 누르기 · 휠 · 끌기, 마우스 올림 설명, 이웃의 초점 강조.
 class KnowledgeGraphViewTest : public QObject
 {
     Q_OBJECT
@@ -110,7 +136,7 @@ private slots:
     {
         QVERIFY2(m_index.Load(QStringLiteral(VISUALMARKDOWN_SHOWCASE_DIR)), VISUALMARKDOWN_SHOWCASE_DIR);
         m_graph = KnowledgeGraph::BuildFromIndex(m_index);
-        m_vecLayouts.resize(static_cast<int>(EGraphLayoutType::BIPARTITE) + 1);
+        m_vecLayouts.resize(static_cast<int>(EGraphLayoutType::EGO) + 1);
         for (const EGraphLayoutType eType : kGraphTypes)
             QVERIFY(ViewTestSupport::RunLayout(m_graph, eType, &m_vecLayouts[static_cast<int>(eType)]));
         QVERIFY(!GetLayout(EGraphLayoutType::NETWORK).vecNodes.isEmpty());
@@ -780,6 +806,169 @@ private slots:
         ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, view.MapToWidget(lineage.vecNodes[0].center).toPoint(), Qt::LeftButton, Qt::NoButton);
         QCOMPARE(spyConcept.count(), 0);
         QCOMPARE(view.GetSelectedId(), QString());
+    }
+
+    // 이웃 보기: 초점 점(bFocus)은 테두리를 보통의 두 배로 두껍게 하고 이름을 굵게 쓴다(design/MoreViews.md §6.2).
+    // 초점 표시를 지운 같은 배치와 견주면 초점 상자 둘레만 다르고(테두리 띠도, 안쪽 글자도), 그 밖은 관계망과 같다:
+    // 초점 표시를 지운 배치는 관계망으로 넘겨도 같은 그림이다. 밝은 · 어두운 테마 모두
+    void egoFocusIsEmphasized()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::EGO);
+        QVERIFY(!layout.vecNodes.isEmpty());
+        QCOMPARE(layout.vecNodes[0].strId, DecodeUtf8(kEgoFocusId));
+        QVERIFY(layout.vecNodes[0].bFocus);
+        GraphLayoutOutput plain = layout;
+        for (LayoutNode& node : plain.vecNodes)
+            node.bFocus = false;
+        for (const bool bDark : { false, true })
+        {
+            const VisualMarkdownTheme theme = bDark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+            KnowledgeGraphView focusView;
+            KnowledgeGraphView plainView;
+            KnowledgeGraphView networkView;
+            for (KnowledgeGraphView* pView : { &focusView, &plainView, &networkView })
+            {
+                pView->resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+                pView->SetTheme(theme);
+            }
+            focusView.SetGraph(m_graph, layout, EGraphLayoutType::EGO);
+            plainView.SetGraph(m_graph, plain, EGraphLayoutType::EGO);
+            networkView.SetGraph(m_graph, plain, EGraphLayoutType::NETWORK);
+            const QImage imageFocus = ViewTestSupport::Render(focusView);
+            const QImage imagePlain = ViewTestSupport::Render(plainView);
+            QVERIFY(ViewTestSupport::Render(networkView) == imagePlain);
+            QVERIFY(imageFocus != imagePlain);
+
+            const QRectF rectFocus = focusView.GetNodeRect(0);
+            QCOMPARE(rectFocus, plainView.GetNodeRect(0));
+            const QRect rectOuter = rectFocus.adjusted(-kFocusMargin, -kFocusMargin, kFocusMargin, kFocusMargin).toAlignedRect();
+            const QRect rectInner = rectFocus.adjusted(kFocusMargin, kFocusMargin, -kFocusMargin, -kFocusMargin).toAlignedRect();
+            int iBorderChanges = 0;
+            int iLabelChanges = 0;
+            QString strOutside;
+            for (int iY = 0; iY < imageFocus.height(); ++iY)
+            {
+                for (int iX = 0; iX < imageFocus.width(); ++iX)
+                {
+                    if (imageFocus.pixel(iX, iY) == imagePlain.pixel(iX, iY))
+                        continue;
+                    if (!rectOuter.contains(iX, iY))
+                        strOutside = QStringLiteral("%1,%2").arg(iX).arg(iY);
+                    else if (rectInner.contains(iX, iY))
+                        ++iLabelChanges;
+                    else
+                        ++iBorderChanges;
+                }
+            }
+            QVERIFY2(strOutside.isEmpty(), qPrintable(strOutside + QStringLiteral(" outside ") + ViewTestSupport::DescribeRect(rectOuter)));
+            QVERIFY2(iBorderChanges > 0, "the focus border is not thicker");
+            QVERIFY2(iLabelChanges > 0, "the focus label is not bold");
+            QVERIFY(ViewTestSupport::SaveSnapshot(imageFocus, QStringLiteral("graph-ego-focus-%1").arg(bDark ? "dark" : "light")));
+        }
+    }
+
+    // 이웃 보기의 둘레 선(bContext)은 테마의 dContextOpacity 만큼 흐리게 그린다(선과 화살촉, design/MoreViews.md §6.2).
+    // 같은 배치를 모두 나무 선으로 그린 그림과 견주면 둘레 선 자리만 다르고(점 상자 · 범례 · 나무 선은 그대로), 그 자리의 잉크가 적다.
+    // 찾기 · 마우스 올림 설명은 같다. 밝은 · 어두운 테마 모두
+    void egoContextEdgesAreFainter()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::EGO);
+        GraphLayoutOutput allTree = layout;
+        QVector<int> vecContextEdges;
+        for (int iEdge = 0; iEdge < allTree.vecEdges.size(); ++iEdge)
+        {
+            if (allTree.vecEdges[iEdge].bContext)
+                vecContextEdges << iEdge;
+            allTree.vecEdges[iEdge].bContext = false;
+        }
+        QCOMPARE(vecContextEdges.size(), kEgoContextEdges);
+        for (const bool bDark : { false, true })
+        {
+            const VisualMarkdownTheme theme = bDark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+            KnowledgeGraphView contextView;
+            KnowledgeGraphView treeView;
+            for (KnowledgeGraphView* pView : { &contextView, &treeView })
+            {
+                pView->resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+                pView->SetTheme(theme);
+            }
+            contextView.SetGraph(m_graph, layout, EGraphLayoutType::EGO);
+            treeView.SetGraph(m_graph, allTree, EGraphLayoutType::EGO);
+            const QImage imageContext = ViewTestSupport::Render(contextView);
+            const QImage imageTree = ViewTestSupport::Render(treeView);
+            QVERIFY(imageContext != imageTree);
+
+            // 다른 점은 둘레 선 가까이에만 있고, 둘레 선 자리(점 상자 밖)의 잉크는 나무 선으로 그린 것보다 적다
+            QVector<QPolygonF> vecLines;
+            QVector<QRectF> vecArrows;
+            for (const int iEdge : vecContextEdges)
+            {
+                QCOMPARE(contextView.GetEdgeLine(iEdge), treeView.GetEdgeLine(iEdge));   // 모양은 같다
+                vecLines << contextView.GetEdgeLine(iEdge);
+                vecArrows << contextView.GetEdgeArrow(iEdge).boundingRect().adjusted(-kEdgeMargin, -kEdgeMargin, kEdgeMargin, kEdgeMargin);
+            }
+            QVector<QRectF> vecBoxes;
+            for (int iNode = 0; iNode < layout.vecNodes.size(); ++iNode)
+                vecBoxes << contextView.GetNodeRect(iNode);
+            const auto funcNearContext = [&vecLines, &vecArrows](const QPointF& point)
+            {
+                for (int iEdge = 0; iEdge < vecLines.size(); ++iEdge)
+                    if (GetDistanceToPolyline(point, vecLines[iEdge]) <= kEdgeMargin || vecArrows[iEdge].contains(point))
+                        return true;
+                return false;
+            };
+            QString strOutside;
+            double dContextInk = 0;
+            double dTreeInk = 0;
+            for (int iY = 0; iY < imageContext.height(); ++iY)
+            {
+                for (int iX = 0; iX < imageContext.width(); ++iX)
+                {
+                    const QPointF ptPixel(iX + 0.5, iY + 0.5);
+                    const bool bDifferent = imageContext.pixel(iX, iY) != imageTree.pixel(iX, iY);
+                    if (bDifferent && !funcNearContext(ptPixel))
+                        strOutside = QStringLiteral("%1,%2").arg(iX).arg(iY);
+                    if (!bDifferent || std::any_of(vecBoxes.cbegin(), vecBoxes.cend(), [&ptPixel](const QRectF& box) { return box.contains(ptPixel); }))
+                        continue;
+                    dContextInk += ViewTestSupport::GetColorDistance(imageContext.pixelColor(iX, iY), theme.background);
+                    dTreeInk += ViewTestSupport::GetColorDistance(imageTree.pixelColor(iX, iY), theme.background);
+                }
+            }
+            QVERIFY2(strOutside.isEmpty(), qPrintable(strOutside));
+            QVERIFY2(dTreeInk > 0 && dContextInk < kMaxContextInkShare * dTreeInk, qPrintable(QStringLiteral("%1 / %2").arg(dContextInk).arg(dTreeInk)));
+
+            // 찾기 · 마우스 올림은 나무 선과 같다
+            for (const int iEdge : vecContextEdges)
+            {
+                const QPoint ptMiddle = contextView.GetEdgeMidpoint(iEdge).toPoint();
+                QCOMPARE(contextView.FindEdgeAt(ptMiddle), treeView.FindEdgeAt(ptMiddle));
+                QCOMPARE(contextView.GetToolTipAt(ptMiddle), treeView.GetToolTipAt(ptMiddle));
+            }
+            QVERIFY(ViewTestSupport::SaveSnapshot(imageContext, QStringLiteral("graph-ego-context-%1").arg(bDark ? "dark" : "light")));
+        }
+    }
+
+    // 이웃 보기도 누르기 · 고르기 · 시그널이 관계망과 같다: 1 걸음 점을 누르면 ConceptActivated 를 내고 그 점과 이웃을 강조한다
+    void egoClickSelectsLikeNetwork()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::EGO);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::EGO);
+        const QImage imageBefore = ViewTestSupport::Render(view);
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        const int iNode = FindNode(layout, DecodeUtf8(kEgoRingOneId));
+        QVERIFY(iNode > 0);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.GetNodeRect(iNode).center().toPoint());
+        QCOMPARE(spyConcept.count(), 1);
+        QCOMPARE(spyConcept.at(0).at(0).toString(), DecodeUtf8(kEgoRingOneId));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kEgoRingOneId));
+        QVERIFY(ViewTestSupport::Render(view) != imageBefore);
+        // 초점 점도 누를 수 있다
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.GetNodeRect(0).center().toPoint());
+        QCOMPARE(spyConcept.count(), 2);
+        QCOMPARE(spyConcept.at(1).at(0).toString(), DecodeUtf8(kEgoFocusId));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kEgoFocusId));
     }
 
     // 빈 배치 · 맞지 않는 그래프도 죽지 않고 그린다

@@ -104,6 +104,7 @@ constexpr double kHaloSize = 6;
 constexpr double kNodeBorderWidth = 1.3;
 constexpr double kNeighborBorderWidth = 2.2;
 constexpr double kSelectedRingWidth = 2.4;
+constexpr double kFocusBorderScale = 2;      // 이웃 보기의 초점 점(bFocus): 테두리를 그 상태(보통 · 이웃 · 고름) 굵기의 두 배로, 이름은 굵게
 constexpr int kDocumentTitleLines = 2;
 constexpr double kMinNodeRadius = 3;         // 줄여도 둥근 모서리 · 접힌 모서리 · 안쪽 여백은 이만큼(px) 남긴다
 constexpr double kMinDocumentFold = 4;
@@ -1025,7 +1026,10 @@ void KnowledgeGraphView::DrawEdges(QPainter& painter) const
             double dWidth = bHighlighted ? kSelectedEdgeWidth : kEdgeWidth;
             if (bLink)
                 dWidth = ViewCommon::Clamp(kMinLinkWidth + (edge.iWeight - 1) * kLinkWidthPerWeight, kMinLinkWidth, kMaxLinkWidth);
-            painter.setOpacity(bSelection && !bHighlighted ? m_theme.dDimOpacity : 1.0);
+            double dOpacity = bSelection && !bHighlighted ? m_theme.dDimOpacity : 1.0;
+            if (edge.bContext)
+                dOpacity *= m_theme.dContextOpacity;   // 이웃의 둘레 선: 그 위에 더 흐리게(선 · 화살촉, 점선은 그대로)
+            painter.setOpacity(dOpacity);
             QPen pen(color, dWidth, Qt::SolidLine, bProposed ? Qt::FlatCap : Qt::RoundCap, Qt::RoundJoin);
             if (bProposed && !m_theme.vecProposedDash.isEmpty())
                 pen.setDashPattern(m_theme.vecProposedDash);
@@ -1050,8 +1054,10 @@ void KnowledgeGraphView::DrawNodes(QPainter& painter) const
     const bool bSelection = m_iSelectedNode >= 0;
     const int iFontPx = GetNodeFontPx();
     const QFont fontConcept = MakeFont(iFontPx);
+    const QFont fontFocus = MakeFont(iFontPx, true);
     const QFont fontDocument = MakeFont(std::max(kMinFontPx, iFontPx - kDocumentFontShrinkPx));
     const QFontMetricsF metricsConcept(fontConcept);
+    const QFontMetricsF metricsFocus(fontFocus);
     const QFontMetricsF metricsDocument(fontDocument);
     const bool bLabels = m_dZoom >= kHideLabelZoom;
     const double dRadius = ViewCommon::Clamp(kNodeRadius * m_dZoom, kMinNodeRadius, 2 * kNodeRadius);
@@ -1074,7 +1080,9 @@ void KnowledgeGraphView::DrawNodes(QPainter& painter) const
             painter.drawRoundedRect(rectNode.adjusted(-kHaloSize, -kHaloSize, kHaloSize, kHaloSize), dRadius + kHaloSize, dRadius + kHaloSize);
         }
         const VisualMarkdownNodeColors colors = node.bDocument ? m_theme.document : m_theme.GetConceptColors(node.strKind);
-        const double dBorder = bSelected ? kSelectedRingWidth : (bNeighbor ? kNeighborBorderWidth : kNodeBorderWidth);
+        double dBorder = bSelected ? kSelectedRingWidth : (bNeighbor ? kNeighborBorderWidth : kNodeBorderWidth);
+        if (node.bFocus)
+            dBorder *= kFocusBorderScale;
         painter.setPen(QPen(bSelected ? m_theme.selectionRing : colors.border, dBorder));
         painter.setBrush(colors.fill);
         if (node.bDocument)
@@ -1102,8 +1110,9 @@ void KnowledgeGraphView::DrawNodes(QPainter& painter) const
         else
         {
             const QRectF rectText = rectNode.adjusted(dPadding, 0, -dPadding, 0);
-            painter.setFont(fontConcept);
-            painter.drawText(rectText, Qt::AlignCenter, metricsConcept.elidedText(node.strLabel, Qt::ElideRight, rectText.width()));
+            const QFontMetricsF& metricsLabel = node.bFocus ? metricsFocus : metricsConcept;
+            painter.setFont(node.bFocus ? fontFocus : fontConcept);
+            painter.drawText(rectText, Qt::AlignCenter, metricsLabel.elidedText(node.strLabel, Qt::ElideRight, rectText.width()));
         }
     }
     painter.setOpacity(1.0);

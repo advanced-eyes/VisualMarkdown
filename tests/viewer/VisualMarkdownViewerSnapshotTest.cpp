@@ -14,7 +14,7 @@
 
 namespace
 {
-constexpr int kGraphFiles = 6;
+constexpr int kGraphFiles = 7;
 constexpr int kChartFiles = 13;
 const QSize kSmallSize(800, 500);
 constexpr const char* kConsoleCodec = "CP949";   // 한국어 Windows 의 콘솔 글자표(시스템 코드 페이지에 기대지 않게 이름으로 고른다)
@@ -56,7 +56,8 @@ private slots:
     // 파일 이름: graph-<보기>.png, chart-DD-TT.png(1부터 두 자리), snapshot.tsv
     void namesFiles()
     {
-        const QStringList vecGraphs { "graph-network.png", "graph-lineage.png", "graph-tree.png", "graph-timeline.png", "graph-matrix.png", "graph-bipartite.png" };
+        const QStringList vecGraphs { "graph-network.png", "graph-ego.png", "graph-lineage.png", "graph-tree.png", "graph-timeline.png", "graph-matrix.png",
+                                      "graph-bipartite.png" };
         QStringList vecNames;
         for (const EGraphLayoutType eType : VisualMarkdownViewerModel::ListViews())
             vecNames << VisualMarkdownViewerSnapshot::MakeGraphFileName(eType);
@@ -67,7 +68,7 @@ private slots:
         QCOMPARE(VisualMarkdownViewerSnapshot::GetListFileName(), QStringLiteral("snapshot.tsv"));
     }
 
-    // showcase 를 찍으면 0 으로 끝나고 PNG 19개(그래프 6 + 차트 13)와 snapshot.tsv(기대 파일과 바이트로 같다)를 남긴다. 그림은 1600 × 1000(기본)이다
+    // showcase 를 찍으면 0 으로 끝나고 PNG 20개(그래프 7 + 차트 13)와 snapshot.tsv(기대 파일과 바이트로 같다)를 남긴다. 그림은 1600 × 1000(기본)이다
     void writesEveryViewAndChart()
     {
         QTemporaryDir dir;

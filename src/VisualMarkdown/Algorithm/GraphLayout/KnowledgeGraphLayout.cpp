@@ -1,6 +1,9 @@
 #include "VisualMarkdown/Algorithm/GraphLayout/KnowledgeGraphLayout.h"
 
+#include "VisualMarkdown/Algorithm/GraphLayout/Common/GraphLayoutCommon.h"
+#include "VisualMarkdown/Algorithm/GraphLayout/Common/KnowledgeGraph.h"
 #include "VisualMarkdown/Algorithm/GraphLayout/Strategy/BipartiteLayoutCPU.h"
+#include "VisualMarkdown/Algorithm/GraphLayout/Strategy/EgoLayoutCPU.h"
 #include "VisualMarkdown/Algorithm/GraphLayout/Strategy/LineageLayoutCPU.h"
 #include "VisualMarkdown/Algorithm/GraphLayout/Strategy/MatrixLayoutCPU.h"
 #include "VisualMarkdown/Algorithm/GraphLayout/Strategy/NetworkLayoutCPU.h"
@@ -17,6 +20,7 @@ KnowledgeGraphLayout::KnowledgeGraphLayout()
     std::unique_ptr<IGraphLayoutStrategy> arrStrategies[] = {
         std::make_unique<NetworkLayoutCPU>(), std::make_unique<LineageLayoutCPU>(), std::make_unique<TreeLayoutCPU>(),
         std::make_unique<TimelineLayoutCPU>(), std::make_unique<MatrixLayoutCPU>(), std::make_unique<BipartiteLayoutCPU>(),
+        std::make_unique<EgoLayoutCPU>(),
     };
     for (std::unique_ptr<IGraphLayoutStrategy>& upStrategy : arrStrategies)
     {
@@ -26,6 +30,12 @@ KnowledgeGraphLayout::KnowledgeGraphLayout()
 }
 
 KnowledgeGraphLayout::~KnowledgeGraphLayout() = default;
+
+QString KnowledgeGraphLayout::FindDefaultFocus(const KnowledgeGraph& graph)
+{
+    const int iFocus = GraphLayoutCommon::FindDefaultFocus(graph);
+    return iFocus >= 0 ? graph.GetNodes()[iFocus].strId : QString();
+}
 
 void KnowledgeGraphLayout::SetStrategy(EGraphLayoutType type)
 {

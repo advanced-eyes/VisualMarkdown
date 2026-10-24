@@ -11,8 +11,8 @@
 
 class KnowledgeGraph;
 
-// 지식 사이 보기 6가지(design/Views.md §5)
-enum class EGraphLayoutType { NETWORK, LINEAGE, TREE, TIMELINE, MATRIX, BIPARTITE };
+// 지식 사이 보기 7가지(design/Views.md §5, 이웃은 design/MoreViews.md §6). 값은 끝에만 더한다
+enum class EGraphLayoutType { NETWORK, LINEAGE, TREE, TIMELINE, MATRIX, BIPARTITE, EGO };
 
 struct LayoutNode
 {
@@ -21,6 +21,7 @@ struct LayoutNode
     QString strKind;        // 개념 종류 코드. 문서는 비운다
     QPointF center;         // 점 상자의 가운데
     bool bDocument = false;
+    bool bFocus = false;    // 이웃 보기의 초점(가운데 점)만 참이다
 };
 
 struct LayoutEdge
@@ -32,6 +33,7 @@ struct LayoutEdge
     bool bDirected = true;
     int iGraphEdge = -1;    // KnowledgeGraph::GetEdges 자리. 문서 ↔ 개념 선은 -1
     int iWeight = 1;        // 문서 ↔ 개념 선의 무게(가리킨 횟수)
+    bool bContext = false;  // 이웃 보기의 둘레 선(초점의 선 · 점과 그 부모를 잇는 나무 선이 아닌 선)만 참이다. 다른 보기는 늘 거짓
 };
 
 struct LayoutTick
@@ -68,7 +70,12 @@ struct GraphLayoutOutput
 
 struct GraphLayoutInput
 {
+    static constexpr int kDefaultEgoDepth = 2;   // 이웃 보기의 기본 깊이(걸음 수)
+
     const KnowledgeGraph* pGraph = nullptr;   // 배치할 그래프(맡지 않는다)
+    // 이웃 보기(EGO)만 본다. 다른 전략은 이 칸을 보지 않는다(design/MoreViews.md §6.1)
+    QString strFocusId;                       // 초점 개념 id. 비었거나 보이는 점이 아니면 기본 초점(KnowledgeGraphLayout::FindDefaultFocus)
+    int iDepth = kDefaultEgoDepth;            // 초점에서 몇 걸음까지 넣는지. 1 아래는 1 이다
 };
 
 using IGraphLayoutStrategy = VisualMarkdown::IStrategy<GraphLayoutInput, GraphLayoutOutput, EGraphLayoutType>;
@@ -89,4 +96,7 @@ constexpr double kLanePadding = 12;              // 계보도 · 타임라인: �
 constexpr double kLaneGap = 16;                  // 계보도 · 타임라인: 갈래 띠 사이 틈
 constexpr double kMatrixCellSize = 36;           // 관계 행렬: 칸 한 변
 constexpr double kBipartiteColumnGap = 240;      // 문서 ↔ 개념: 두 열 상자 사이 틈
+constexpr double kEgoRingGap = 120;              // 이웃: 고리 반지름이 앞 고리(초점은 0)보다 적어도 이만큼 크다
+constexpr double kEgoNodeGapX = 48;              // 이웃: 같은 고리 · 안쪽 고리의 점 상자 사이 가로 틈(그 사이 선과 화살촉이 보이게 쌓을 때보다 넓다)
+constexpr double kEgoNodeGapY = 32;              // 이웃: 점 상자 사이 세로 틈
 }

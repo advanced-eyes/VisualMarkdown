@@ -1,7 +1,7 @@
 # 보기 설계(5 · 6단계)
 
 - 작성일: 2026-10-24
-- 상태: 끝(2026-10-24, §10 의 1–6). "제안" 으로 표시한 결정은 사용자가 읽으며 고칠 수 있다.
+- 상태: 끝(2026-10-24, §10 의 1–6). "제안" 으로 표시한 결정은 사용자가 읽으며 고칠 수 있다. 7단계에서 이웃 보기와 히트맵 · 도넛 차트를 더했다(조사 · 설계는 [MoreViews.md](MoreViews.md), 이 문서에는 규칙을 함께 적었다).
 - 바탕: [format/Visualization.md](../format/Visualization.md)(보기가 읽는 칸), [examples/showcase](../examples/showcase/)(기대값), [README](../README.md) §5.1(층), Ocean `docs/Qt.md` §3(뷰와 화면 로직을 나눈다).
 
 ## 1. 목표와 범위
@@ -46,18 +46,18 @@ src/VisualMarkdown/
 │   │   ├── KnowledgeGraphLayout.h/.cpp        EGraphLayoutType 으로 전략을 고른다
 │   │   ├── Common/KnowledgeGraph.h/.cpp       색인 → 그래프(점 · 선 · 덩어리)
 │   │   ├── Common/GraphLayoutTypes.h          배치 결과
-│   │   └── Strategy/NetworkLayoutCPU · LineageLayoutCPU · TreeLayoutCPU · TimelineLayoutCPU · MatrixLayoutCPU · BipartiteLayoutCPU
+│   │   └── Strategy/NetworkLayoutCPU · LineageLayoutCPU · TreeLayoutCPU · TimelineLayoutCPU · MatrixLayoutCPU · BipartiteLayoutCPU · EgoLayoutCPU
 │   └── ChartBuilder/                  지식 안 차트 설정
 │       ├── KnowledgeChartBuilder.h/.cpp
 │       └── Common/ChartTypes.h
 └── UI/                                4층(VisualMarkdownView 타깃, QtWidgets)
     ├── VisualMarkdownTheme.h/.cpp
-    ├── KnowledgeGraphView.h/.cpp      관계망 · 계보도 · 분류 트리 · 타임라인 · 문서 ↔ 개념
+    ├── KnowledgeGraphView.h/.cpp      관계망 · 이웃 · 계보도 · 분류 트리 · 타임라인 · 문서 ↔ 개념
     ├── KnowledgeMatrixView.h/.cpp     관계 행렬
     ├── KnowledgeChartView.h/.cpp      차트
     └── ViewCommon.h/.cpp              세 위젯이 함께 쓰는 도움 함수(쓰는 쪽에 내놓는 머리글이 아니다)
 tools/VisualMarkdownViewer/            보기 앱(§8). main.cpp 를 뺀 소스는 VisualMarkdownViewerLib 로 묶어 시험이 링크한다
-├── VisualMarkdownViewerModel          화면 로직(QtCore): 색인 · 보기 6개의 배치 · 표마다의 차트 설정
+├── VisualMarkdownViewerModel          화면 로직(QtCore): 색인 · 보기 7개의 배치 · 이웃의 초점 · 표마다의 차트 설정
 ├── VisualMarkdownViewerWindow         창: 나무 · 쪽 · 도구 막대 · 상태 줄
 ├── VisualMarkdownViewerChartPage · MatrixPage · Palette   차트 쪽(차트 + 원래 표) · 행렬 쪽(스크롤) · 테마 → 창 팔레트
 ├── VisualMarkdownViewerSnapshot       스냅샷 모드
@@ -120,10 +120,11 @@ public:
 `KnowledgeGraph` 는 색인에서 만든다: 점(보이는 개념: id · 이름 · 종류 · 연도 · 다루는 문서 수 · 이어진 선 수 · 덩어리 번호), 선(`KnowledgeEdge`), 덩어리(큰 것부터, 같으면 이름 열쇠 순).
 
 ```cpp
-enum class EGraphLayoutType { NETWORK, LINEAGE, TREE, TIMELINE, MATRIX, BIPARTITE };
+enum class EGraphLayoutType { NETWORK, LINEAGE, TREE, TIMELINE, MATRIX, BIPARTITE, EGO };   // 값은 끝에만 더한다(이웃은 MoreViews.md §6)
 
-struct LayoutNode       { QString strId; QString strLabel; QString strKind; QPointF center; bool bDocument = false; };
-struct LayoutEdge       { int iFrom = -1; int iTo = -1; QString strKind; ERelationStatus eStatus; bool bDirected = true; int iGraphEdge = -1; int iWeight = 1; };
+struct GraphLayoutInput { const KnowledgeGraph* pGraph = nullptr; QString strFocusId; int iDepth = 2; };   // 초점 · 깊이는 이웃만 본다
+struct LayoutNode       { QString strId; QString strLabel; QString strKind; QPointF center; bool bDocument = false; bool bFocus = false; };   // bFocus: 이웃의 초점만
+struct LayoutEdge       { int iFrom = -1; int iTo = -1; QString strKind; ERelationStatus eStatus; bool bDirected = true; int iGraphEdge = -1; int iWeight = 1; bool bContext = false; };   // bContext: 이웃의 둘레 선만
 struct LayoutTick       { double dPosition = 0; QString strLabel; };          // 타임라인 연도
 struct LayoutLane       { QString strLabel; double dTop = 0; double dBottom = 0; };
 struct LayoutMatrixCell { int iRow = -1; int iColumn = -1; QStringList vecKinds; };
@@ -151,6 +152,9 @@ struct GraphLayoutOutput
 | 타임라인 `TIMELINE` | 연도 있는 보이는 점, 그 사이의 `isA` · `improves` 선 | x 는 연도(해마다 같은 간격, 눈금은 있는 해마다). 갈래는 점이 속한 분류 나무의 뿌리(없으면 개선 묶음, 그것도 없으면 "그 밖")다. 갈래 순서는 점이 많은 것부터, "그 밖" 은 늘 마지막이다. 같은 갈래 · 같은 해의 점은 세로로 쌓는다. 연도 없는 점은 `vecUnplaced` 로 |
 | 관계 행렬 `MATRIX` | 보이는 점 전부 | 순서는 덩어리(큰 것부터) 안에서 이름 열쇠 순. 칸: 방향 있는 선은 (from 행, to 열), 방향 없는 선은 두 칸 모두. 한 칸에 종류가 여럿이면 모두 담는다. 대각선은 비운다 |
 | 문서 ↔ 개념 `BIPARTITE` | 문서 전부, 문서가 가리키는 개념(개념 파일이 있는 것) | 왼쪽 열에 문서(문서 목록 순), 오른쪽 열에 개념. 개념은 가리키는 문서 자리의 평균(무게 중심) 순으로 놓아 엇갈림을 줄인다. 선 무게는 그 문서가 그 개념을 가리킨 횟수(카드 링크 · 관계 끝 · 표 `concepts`) |
+| 이웃 `EGO` | 초점(`strFocusId`. 비었거나 보이는 점이 아니면 기본 초점)에서 방향을 보지 않고 깊이(`iDepth`, 기본 2, 1 아래는 1) 걸음 안의 점, 그 점들 사이의 선 전부(그래프 선 순서) | 초점을 가운데(0, 0)에, k 걸음 점을 k 번째 고리에 둔다(Eades 방사형 나무, [MoreViews.md §6.1](MoreViews.md)). 1 걸음 순서는 초점과 잇는 선의 관계 종류(어휘 순, 둘 이상이면 앞의 종류) → 나가는 선 · 들어오는 선 · 방향 없는 선 → 점 번호. 2 걸음부터는 앞 고리에서 이어진 점 가운데 순서가 가장 앞인 점이 부모이고, 한 부모의 자식은 점 번호 순이다. 쐐기는 잎 수에 비례하고 첫 1 걸음 점의 쐐기 가운데가 12시(−90°), 시계 방향이다. 반지름은 고리마다 하나: 앞 고리 + 120 에서 시작해 같은 고리 · 안쪽 고리의 점 상자와 틈(가로 48 · 세로 32)을 두고 겹치지 않는 가장 작은 값. 출력 점은 초점(`bFocus`) → 1 걸음 → 2 걸음(각 순) … . 점과 그 부모(1 걸음 점은 초점)를 잇는 선은 방향과 상관없이 모두 나무 선이고, 그 밖(같은 고리 점끼리 · 부모가 아닌 앞 고리 점과 · 제 자신으로 가는 선)은 둘레 선(`bContext`)이다 |
+
+- 기본 초점(`KnowledgeGraphLayout::FindDefaultFocus`, 보기 앱도 쓴다): 선이 가장 많은 점, 같으면 다루는 문서가 많은 점, 같으면 점 번호(이름 열쇠) 순으로 앞의 것. 점이 없으면 빈 글이고 배치도 비었다.
 
 showcase 에서 나와야 하는 것(테스트로 확인한다)
 - 관계망: 점 31 · 선 36, 덩어리 6개의 상자가 겹치지 않는다, 점 상자끼리 겹치지 않는다. 기획서 덩어리는 연구 덩어리 오른쪽 열에, 선 없는 점 4개는 그 아래 같은 열에 있다. 배치 범위의 가로는 세로의 1.7배 이하다.
@@ -159,6 +163,7 @@ showcase 에서 나와야 하는 것(테스트로 확인한다)
 - 타임라인: 놓인 점 16, 연도 없는 점 15. 갈래 3개를 이 순서로: 검출기 9점 · 결제 모듈 1점 · 그 밖 6점(COCO · RPN · RoI 풀링 · 배치 정규화 · Darknet-19 · Focal Loss). 같은 갈래 안에서 해가 늦을수록 오른쪽. DPM 은 없다.
 - 관계 행렬: 31 × 31, 채워진 칸 40개(방향 있는 선 31개 중 두 개가 한 칸을 나눠 30칸 + 방향 없는 선 5개 × 2칸). 종류가 둘인 칸은 (결제 모듈 2판, 결제 모듈) 하나.
 - 문서 ↔ 개념: 문서 6, 문서마다 선 YOLO 5 · YOLO9000 7 · YOLOv3 5(개념 파일 없는 Darknet-53 은 뺀다) · 2단계 노트 7 · Focal Loss 4 · 결제 기획서 9.
+- 이웃: 기본 초점 Faster R-CNN. 깊이 2 는 점 12 · 선 18(나무 선 11 · 둘레 선 7), 깊이 1 은 점 7 · 선 9(나무 선 6 · 둘레 선 3). 허브 1단계 검출기를 초점으로 주면 깊이 2 는 나무 선 13 · 둘레 선 8. 1 걸음 6점 · 2 걸음 5점의 순서 · 부모 · 쐐기 가운데 각과 나무 · 둘레 선은 showcase README §2.2(MoreViews.md §7.3)와 같다. 고리마다 반지름이 같고 바깥 고리가 더 크며, 점 상자끼리 겹치지 않는다(모든 점을 초점으로 깊이 1–3 에서도). 선 없는 COCO 를 초점으로 주면 점 1 · 선 0.
 
 ## 6. 차트 설정
 
@@ -197,11 +202,12 @@ showcase 의 표 13개가 README §3 의 시작 차트와 같게 나와야 한�
 
 ## 7. 위젯
 
-- `VisualMarkdownTheme`: 바탕 · 글자 · 흐린 글자 · 격자, 개념 종류 7개(+ 모르는 종류)의 점 색, 관계 종류 5개의 선 색, AI 제안 선(점선 · 흐리게), 강조, 차트 계열 색 8개, 단계 막대의 시작 · 늘어남 · 줄어듦, 크기 눈금 `vecSequentialRamp`(히트맵 칸. 밝은 테마는 파랑 100 → 700, 어두운 테마는 같은 색을 거꾸로), 채움 위 글자 `fillTextDark` · `fillTextLight`(히트맵 칸 · 도넛 조각 글. 검정 · 흰색, 채움과 대비가 큰 쪽을 쓴다). 내장 기본값은 `MakeLight()` · `MakeDark()` 다. 기본 생성한 테마는 색이 비어 있으니, 쓰는 쪽(Ocean 의 mapper)은 내장 테마에서 시작해 바꾼다. 글자는 바탕 · 점 색 위에서 4.5:1, 선 · 막대는 바탕 위에서 3:1 이상, 채움 위 글자는 크기 눈금(고르게 나눈 101곳) · 계열 색 위에서 4.5:1 이상의 대비를 갖고, 크기 눈금의 밝기는 한쪽으로 바뀐다(`VisualMarkdownThemeTest` 가 잰다).
+- `VisualMarkdownTheme`: 바탕 · 글자 · 흐린 글자 · 격자, 개념 종류 7개(+ 모르는 종류)의 점 색, 관계 종류 5개의 선 색, AI 제안 선(점선 · 흐리게), 이웃의 둘레 선 불투명도 `dContextOpacity`(0.45), 강조, 차트 계열 색 8개, 단계 막대의 시작 · 늘어남 · 줄어듦, 크기 눈금 `vecSequentialRamp`(히트맵 칸. 밝은 테마는 파랑 100 → 700, 어두운 테마는 같은 색을 거꾸로), 채움 위 글자 `fillTextDark` · `fillTextLight`(히트맵 칸 · 도넛 조각 글. 검정 · 흰색, 채움과 대비가 큰 쪽을 쓴다). 내장 기본값은 `MakeLight()` · `MakeDark()` 다. 기본 생성한 테마는 색이 비어 있으니, 쓰는 쪽(Ocean 의 mapper)은 내장 테마에서 시작해 바꾼다. 글자는 바탕 · 점 색 위에서 4.5:1, 선 · 막대는 바탕 위에서 3:1 이상, 채움 위 글자는 크기 눈금(고르게 나눈 101곳) · 계열 색 위에서 4.5:1 이상의 대비를 갖고, 크기 눈금의 밝기는 한쪽으로 바뀐다(`VisualMarkdownThemeTest` 가 잰다).
 - `KnowledgeGraphView`(`QWidget`): 배치 결과와 점 정보(이름 · 종류 · 연도 · 정의)를 받아 그린다. 선(방향 있는 선은 화살표, AI 제안은 점선, 종류마다 색), 점(종류마다 색의 둥근 상자, 문서는 다른 모양), 타임라인 눈금 · 갈래, 연도 없는 점 목록, 범례. 확대 · 이동 · 맞춤, 마우스 올림 설명, 누르면 이웃 강조. 시그널: `ConceptActivated(id)`, `DocumentActivated(id)`.
   - 맞춤은 1배보다 키우지 않는다(배치 단위가 화면 점 1개라, 작은 그래프가 부풀어 갈래 이름과 상자 글자 크기가 어긋나지 않게). 휠로는 더 키울 수 있다.
   - 같은 열에 붙어 쌓인 두 상자(타임라인의 같은 해) 사이 선은 상자 오른쪽으로 휘어 나가는 곡선으로 그려 화살촉이 보이게 한다.
   - 개념 점 설명에는 그 개념이 개선한 것(개선 선의 대상과 `설명`)을 함께 쓴다. B 를 볼 때 A 와 무엇을 고쳤는지가 보이게 하려는 것이다(Visualization.md §3, showcase §2.2 계보도).
+  - 이웃 보기의 초점 점(`bFocus`)은 테두리를 그 상태(보통 · 이웃 · 고름) 굵기의 두 배로 그리고 이름을 굵게 쓴다. 둘레 선(`bContext`)은 선 · 화살촉을 테마의 `dContextOpacity`(기본 0.45) 불투명도로 흐리게 그린다. 고른 점의 강조 · 흐림 위에 곱하고, AI 제안 둘레 선은 점선 그대로다. 나무 선이 걸음의 뼈대로 또렷이 보이고, 고리를 가로지르는 긴 둘레 선이 다른 점 상자 밑을 지나도 그 점의 선으로 잘못 읽히지 않게 하려는 것이다. 범례 줄은 없고, 점은 흐리게 하지 않는다. 그 밖(선 · 점 모양 · 확대 · 맞춤 · 마우스 올림 · 누르기 · 시그널)은 관계망과 같다. `bFocus` · `bContext` 가 없는 배치는 전과 같게 그린다.
 - `KnowledgeMatrixView`: 행 · 열 이름, 칸 색(종류가 둘이면 칸을 대각선으로 나눈다), 마우스 올림 설명. 칸 크기는 위젯에 맞추되 14px 보다 작게, 배치의 칸 크기(36)보다 크게 하지 않는다.
 - `KnowledgeChartView`: `ChartSpec` 을 그린다. 축 · 눈금 · 격자, 막대(여러 계열이면 나란히), 단계 막대, 선(빈 값에서 끊음), 점(계열마다 색), 범례, 제목 · 밑글. `NONE` 이면 가운데에 그 까닭을 쓴다.
   - 히트맵: 색 범례(낮음 → 높음 띠. 색 눈금이 하나면 앞에 y 열 이름, 양 끝에 가장 작은 값 · 가장 큰 값, 여럿이면 낮음 · 높음과 "y 열마다 따로 칠한다") 아래 칸 격자. 범례는 위젯보다 넓어지지 않는다: 띠와 양 끝 값은 줄이지 않고, 띠가 가장 작은 너비(40px)까지 줄어든 뒤에도 넘치면 앞의 y 열 이름을 '…' 로 줄인다(이름은 범례 위 마우스 올림에 다 쓴다). 위에 열 이름, 왼쪽에 행 이름(넘치면 '…', 마우스 올림에 전부), 칸 사이 2px 바탕 틈, 행 높이는 위 한계(48px)까지. 칸 색은 그 y 열 색 눈금에서 값 자리의 색(범위가 0 이면 가운데), 칸 글은 들어갈 때만 채움과 대비가 큰 글자 색으로 쓴다. 빈 칸은 채우지 않고 격자 색 1px 테두리와 흐린 "—". 마우스 올림은 `행 이름 · 열 이름: 값 단위`(빈 칸은 `값 없음`), `FindPointAt` · `GetMarkRect` 는 칸, `GetPlotRect` 는 칸 격자, `GetLegendRect` 는 색 범례다. 모든 칸이 비면 "그릴 값이 없다" 를 쓴다.
@@ -211,26 +217,27 @@ showcase 의 표 13개가 README §3 의 시작 차트와 같게 나와야 한�
 ## 8. 보기 앱
 
 - `VisualMarkdownViewer [wiki 폴더] [--theme light|dark] [--size 가로x세로]`. 폴더를 주지 않으면 이 저장소의 `examples/showcase/wiki` 를 연다. `--size` 를 주지 않으면 창은 1600×1000 을 화면의 85% 안으로 줄인 크기다.
-- 왼쪽 나무: 지식 사이(관계망 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념), 지식 안(문서 → 표, 표 이름 뒤에 차트 종류). 문서를 고르면 문서 쪽(제목 · 표 목록)을 보이고, 표가 없는 문서는 그렇다고 알린다.
+- 왼쪽 나무: 지식 사이(관계망 · 이웃 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념. 이웃은 `이웃 · {초점 이름}` 이고 초점이 바뀌면 고친다), 지식 안(문서 → 표, 표 이름 뒤에 차트 종류). 문서를 고르면 문서 쪽(제목 · 표 목록)을 보이고, 표가 없는 문서는 그렇다고 알린다.
 - 오른쪽: 고른 보기. 관계 행렬은 가장 작은 칸에서도 창보다 크면 스크롤로 본다(`KnowledgeMatrixView::minimumSizeHint`).
 - 지식 안: 차트 아래에 원래 표(읽기 전용, 머리 줄은 열 이름과 단위, 칸은 원문 글 그대로)를 보인다. 차트 종류 상자(추천 · 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 도넛)로 바꿀 수 있다(`KnowledgeChartBuilder::SetStrategy` · 추천이면 `ResetStrategy`, 표마다 기억한다). 차트로 그리지 않는 표는 제목 · 까닭 한 줄 · 표를 보이고 상자를 끈다.
 - 도구: 폴더 열기(읽지 못하면 알리고 앞의 wiki 를 그대로 둔다), 밝음/어둠(창 팔레트도 따른다), 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수(마우스 올림으로 목록).
 - 점을 누르면(`ConceptActivated`) 상태 줄에 그 개념의 이름 · 종류 · 연도를 보인다. 문서 ↔ 개념에서 문서를 누르면(`DocumentActivated`) 나무에서 그 문서를 고른다.
-- 배치는 보기를 처음 열 때 계산하고 wiki 를 다시 읽을 때까지 둔다. 차트 설정은 표를 고를 때 만든다.
+- 이웃의 초점([MoreViews.md §6.2](MoreViews.md)): 보기 앱 모델이 초점 id 를 갖는다. 처음 · 다시 읽은 뒤에는 비었다(기본 초점). 어느 그래프 보기에서든 점을 누르면(`ConceptActivated`) 초점을 그 개념으로 바꾸고, 실제 초점이 바뀌면 이웃 배치를 버리고 나무 글을 고친다. 지금 이웃 보기를 보고 있으면 누르기 처리가 끝난 뒤(다음 이벤트 차례) 바로 다시 배치해 맞춰 보인다. 그래서 이웃 보기 안에서 점을 누르면 그 점으로 옮겨 간다. 초점 점을 다시 누르면 배치는 그대로 두고 고르기만 한다. 깊이는 2 로 둔다(고르는 칸이 없다).
+- 배치는 보기를 처음 열 때 계산하고 wiki 를 다시 읽을 때까지 둔다(이웃은 초점이 바뀌어도 다시 계산한다). 차트 설정은 표를 고를 때 만든다.
 - `--snapshot <폴더> [--theme light|dark] [--size 가로x세로]`(기본 light · 1600×1000): 화면 없이(offscreen) 창과 같은 쪽 위젯을 그려 PNG 로 남기고 끝난다.
-  - 파일: `graph-network.png` · `graph-lineage.png` · `graph-tree.png` · `graph-timeline.png` · `graph-matrix.png` · `graph-bipartite.png`, 표마다 `chart-DD-TT.png`(DD 는 문서 목록 순 · TT 는 문서 안 표 순, 1부터 두 자리)
-  - `snapshot.tsv`(UTF-8 · LF, 머리 줄 있음): 파일 · 보기(network … bipartite · chart) · 문서 id · 표 제목 · 차트 종류(`EChartType` 이름)
+  - 파일: `graph-network.png` · `graph-ego.png`(기본 초점) · `graph-lineage.png` · `graph-tree.png` · `graph-timeline.png` · `graph-matrix.png` · `graph-bipartite.png`, 표마다 `chart-DD-TT.png`(DD 는 문서 목록 순 · TT 는 문서 안 표 순, 1부터 두 자리)
+  - `snapshot.tsv`(UTF-8 · LF, 머리 줄 있음): 파일 · 보기(network · ego … bipartite · chart) · 문서 id · 표 제목 · 차트 종류(`EChartType` 이름). 그래프 줄의 뒤 세 칸은 비었다
   - 끝 코드: 0 성공, 2 잘못된 인자(모르는 인자 · 같은 인자 두 번 · `--size` 한 변 1–8192 밖 · 모르는 `--theme`), 3 wiki 를 읽지 못함, 4 파일을 못 씀. 까닭은 표준 오류에 쓴다.
 - 빌드: `VISUALMARKDOWN_BUILD_VIEWER`(기본: 이 저장소가 최상위일 때만). 콘솔 실행 파일이다(스냅샷 오류를 콘솔에 쓴다).
 
 ## 9. 테스트
 
 - `KnowledgeIndexTest`: showcase README §2.1 의 기대값을 진짜 색인으로 확인한다. `ShowcaseWikiTest` 안에 있던 색인 계산은 `KnowledgeIndex` 로 바꾼다(기대값은 그대로).
-- `KnowledgeGraphLayoutTest`: §5 의 showcase 기대값과 배치 조건(겹침 없음 · 방향 · 깊이 · 순서), 같은 입력이면 같은 배치.
+- `KnowledgeGraphLayoutTest`: §5 의 showcase 기대값과 배치 조건(겹침 없음 · 방향 · 깊이 · 순서), 같은 입력이면 같은 배치. 이웃: 기본 초점(선 수 → 문서 수 → 이름 열쇠), 초점 고르기(빈 · 없는 · 숨은 id 는 기본 초점, 선 없는 점은 점 하나), 깊이 1 · 2(1 아래는 1), 1 걸음 순서 · 부모 · 쐐기 각(MoreViews.md §7.3, 합성 그래프의 종류 · 방향 · 이름 열쇠 순서), 나무 선 · 둘레 선(기본 초점 11 · 7, 깊이 1, 허브 1단계 검출기 13 · 8, 부모와 자식 사이 선 둘 · 제 자신으로 가는 선), 고리마다 같은 반지름 · 바깥이 더 큼 · 겹침 없음(모든 점을 초점으로 깊이 1–3), 다른 전략은 초점 · 깊이 칸을 보지 않고 둘레 선이 없다.
 - `KnowledgeChartBuilderTest`: 표 13개가 README §3 과 같은 차트 · 계열 · 축 · 빈 값을 내는지, 숫자 읽기, 히트맵의 추천 경계 · y 열마다의 색 눈금 · 겹친 칸, 도넛의 추천 경계(단위 % · 합 100 ± 1 · 행 2–6 · 빈 칸 · 0 보다 작은 값 · `series` · y 둘) · 첫 계열 · 축 하나 · 경고.
-- `VisualMarkdownViewTests`(offscreen): 보기마다 그려지는지(비지 않음, 두 번 그리면 같음), 위치로 점 · 칸 · 조각 찾기, 도넛 조각의 각 · 조각 글 · 범례 목록, 테마 바꾸기, 색 대비, 설명 글, 상호작용. `VISUALMARKDOWN_SNAPSHOT_DIR` 을 정하면 그린 그림을 PNG 로 남긴다.
-- `VisualMarkdownViewerTests`(offscreen): 인자 · 끝 코드, 화면 로직(보기 6개의 점 · 선 수, 표 13개의 차트 종류, 종류 바꾸기 · 되돌리기, 읽기 실패 때 앞 상태 지키기), 창(나무 → 쪽, `DocumentActivated` → 나무, 테마, 차트 종류 상자, 그리지 않는 표, 상태 줄), 스냅샷.
-- `VisualMarkdownViewerSnapshotTest`(ctest, `cmake -P`): 실행 파일로 showcase 스냅샷을 찍어 끝 코드 0 · PNG 19개 · 그림 크기를 보고, `snapshot.tsv` 가 `tests/viewer/showcase-snapshot.tsv` 와 바이트로 같은지 본다. 잘못된 인자 · 없는 wiki · 못 쓰는 파일의 끝 코드도 본다.
+- `VisualMarkdownViewTests`(offscreen): 보기마다 그려지는지(비지 않음, 두 번 그리면 같음), 위치로 점 · 칸 · 조각 찾기, 도넛 조각의 각 · 조각 글 · 범례 목록, 테마 바꾸기, 색 대비, 설명 글, 상호작용, 이웃 초점 점의 강조(초점 상자 둘레만 바뀌고 테두리 띠 · 글자 모두 바뀐다, 초점 표시가 없으면 관계망과 같은 그림), 둘레 선(같은 선을 나무 선으로 그린 그림보다 흐리고 둘레 선 자리만 다르다, 찾기 · 마우스 올림은 같다). `VISUALMARKDOWN_SNAPSHOT_DIR` 을 정하면 그린 그림을 PNG 로 남긴다.
+- `VisualMarkdownViewerTests`(offscreen): 인자 · 끝 코드, 화면 로직(보기 7개의 순서 · 점 · 선 수, 이웃의 초점 · 나무 글 · 배치 버리기 · 다시 읽으면 기본 초점, 표 13개의 차트 종류, 종류 바꾸기 · 되돌리기, 읽기 실패 때 앞 상태 지키기), 창(나무 → 쪽, `DocumentActivated` → 나무, `ConceptActivated` → 이웃 초점(다른 보기에서 · 이웃 보기 안에서), 테마, 차트 종류 상자, 그리지 않는 표, 상태 줄), 스냅샷.
+- `VisualMarkdownViewerSnapshotTest`(ctest, `cmake -P`): 실행 파일로 showcase 스냅샷을 찍어 끝 코드 0 · PNG 20개 · 그림 크기를 보고, `snapshot.tsv` 가 `tests/viewer/showcase-snapshot.tsv` 와 바이트로 같은지 본다. 잘못된 인자 · 없는 wiki · 못 쓰는 파일의 끝 코드도 본다.
 
 ## 10. 순서
 
@@ -242,6 +249,7 @@ showcase 의 표 13개가 README §3 의 시작 차트와 같게 나와야 한�
 4. 테마 · 위젯 3개 · 위젯 테스트 — 끝
 5. 보기 앱 · 스냅샷 · 문서 반영(README · Visualization.md) — 끝
 6. 관계망 덩어리를 세로 열로 쌓기(보기 앱 창에서 점 이름이 잘리는 것을 보고 더했다) — 끝
+7. 보기 더하기: 히트맵 → 도넛 → 이웃([MoreViews.md §8](MoreViews.md)) — 끝
 
 ## 11. 남은 위험
 

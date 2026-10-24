@@ -42,6 +42,10 @@ struct ImprovesGroups
 };
 ImprovesGroups BuildImprovesGroups(const KnowledgeGraph& graph);
 
+// 이웃 보기의 기본 초점(점 번호, design/MoreViews.md §6.1): 선이 가장 많은 점, 같으면 다루는 문서가 많은 점, 같으면 점 번호(이름 열쇠)가 앞인 점.
+// 점이 없으면 -1
+int FindDefaultFocus(const KnowledgeGraph& graph);
+
 QRectF MakeNodeBox(const QPointF& center);
 // 점 상자를 모두 담는 사각형. 점이 없으면 빈 사각형
 QRectF ComputeNodeBounds(const QVector<LayoutNode>& nodes);

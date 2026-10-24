@@ -18,6 +18,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyle>
+#include <QTimer>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -100,7 +101,7 @@ VisualMarkdownViewerWindow::VisualMarkdownViewerWindow(QWidget* parent)
     setWindowTitle(kWindowTitle);
     resize(kDefaultWidth, kDefaultHeight);
 
-    // 오른쪽 쪽들: 그래프 보기 5개 · 행렬 쪽 · 차트 쪽 · 문서 쪽
+    // 오른쪽 쪽들: 그래프 보기 6개 · 행렬 쪽 · 차트 쪽 · 문서 쪽
     for (const EGraphLayoutType eType : VisualMarkdownViewerModel::ListViews())
     {
         if (eType == EGraphLayoutType::MATRIX)
@@ -364,7 +365,7 @@ void VisualMarkdownViewerWindow::BuildTree()
     m_pTree->clear();
     QTreeWidgetItem* pBetween = MakeCategory(m_pTree, kBetweenTitle);
     for (const EGraphLayoutType eType : VisualMarkdownViewerModel::ListViews())
-        MakeItem(pBetween, VisualMarkdownViewerModel::GetViewLabel(eType), EItemKind::VIEW, static_cast<int>(eType));
+        MakeItem(pBetween, m_model.GetViewTitle(eType), EItemKind::VIEW, static_cast<int>(eType));   // 이웃은 "이웃 · {초점 이름}"
 
     // 지식 안: 문서(문서 목록 순)와 그 아래 표. 표가 없는 문서는 고를 수 없는 알림 항목을 단다
     QTreeWidgetItem* pWithin = MakeCategory(m_pTree, kWithinTitle);
@@ -545,7 +546,29 @@ void VisualMarkdownViewerWindow::HandleCurrentItemChanged(QTreeWidgetItem* curre
 
 void VisualMarkdownViewerWindow::HandleConceptActivated(const QString& conceptId)
 {
-    m_pConceptLabel->setText(m_model.DescribeConcept(conceptId));
+    // 시그널 글은 보낸 보기의 배치 안을 가리킬 수 있으니 먼저 베껴 둔다
+    const QString strConceptId = conceptId;
+    m_pConceptLabel->setText(m_model.DescribeConcept(strConceptId));
+
+    // 이웃 보기의 초점을 그 개념으로 옮긴다(design/MoreViews.md §6.2). 실제 초점이 바뀌었을 때만 배치를 버리고 나무 글을 고친다
+    if (!m_model.SetFocusConcept(strConceptId))
+        return;
+    m_setFilledViews.remove(static_cast<int>(EGraphLayoutType::EGO));
+    QTreeWidgetItem* pEgoItem = FindViewItem(EGraphLayoutType::EGO);
+    if (pEgoItem != nullptr)
+        pEgoItem->setText(0, m_model.GetViewTitle(EGraphLayoutType::EGO));
+    // 이웃 보기를 보고 있으면 바로 다시 배치해 보인다. 이 시그널은 그 보기의 누르기 처리 안에서 오므로,
+    // 누르기 처리가 끝난 뒤(다음 이벤트 차례)에 바꿔 그 보기가 지금 쓰는 배치를 처리 도중에 지우지 않게 한다
+    if (m_pStack->currentWidget() == GetGraphView(EGraphLayoutType::EGO))
+        QTimer::singleShot(0, this, &VisualMarkdownViewerWindow::RefreshEgoView);
+}
+
+void VisualMarkdownViewerWindow::RefreshEgoView()
+{
+    // 그사이 다른 쪽으로 갔으면 그대로 둔다(이웃을 다시 열 때 새 초점으로 배치한다). 이미 다시 넣었으면 또 하지 않는다
+    if (m_pStack->currentWidget() != GetGraphView(EGraphLayoutType::EGO) || m_setFilledViews.contains(static_cast<int>(EGraphLayoutType::EGO)))
+        return;
+    ShowView(EGraphLayoutType::EGO);   // 새 배치를 넣고 맞춘다(KnowledgeGraphView::SetGraph)
 }
 
 void VisualMarkdownViewerWindow::HandleDocumentActivated(const QString& documentId)

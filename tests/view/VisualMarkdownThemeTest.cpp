@@ -265,6 +265,8 @@ private slots:
         QCOMPARE(defaults.dProposedFade, builtIn.dProposedFade);
         QCOMPARE(defaults.vecProposedDash, builtIn.vecProposedDash);
         QCOMPARE(defaults.dDimOpacity, builtIn.dDimOpacity);
+        QCOMPARE(defaults.dContextOpacity, builtIn.dContextOpacity);
+        QVERIFY2(builtIn.dContextOpacity > 0 && builtIn.dContextOpacity < 1, qPrintable(QString::number(builtIn.dContextOpacity)));   // 이웃의 둘레 선: 흐리지만 보인다
         QCOMPARE(defaults.iNodeFontPx, builtIn.iNodeFontPx);
         QCOMPARE(defaults.iLabelFontPx, builtIn.iLabelFontPx);
         QCOMPARE(defaults.iSmallFontPx, builtIn.iSmallFontPx);

@@ -95,7 +95,7 @@ QString VisualMarkdownViewerOptions::GetUsage()
     return QStringLiteral(
         "사용: VisualMarkdownViewer [wiki 폴더] [--snapshot <폴더>] [--theme light|dark] [--size 가로x세로]\n"
         "  wiki 폴더   documents/ · concepts/ 가 있는 폴더. 주지 않으면 examples/showcase/wiki\n"
-        "  --snapshot  보기 6개와 표마다의 차트를 그 폴더에 PNG 로 남기고 끝난다(목록 snapshot.tsv, 창을 띄우지 않는다)\n"
+        "  --snapshot  보기 7개와 표마다의 차트를 그 폴더에 PNG 로 남기고 끝난다(목록 snapshot.tsv, 창을 띄우지 않는다)\n"
         "  --theme     light(기본) 또는 dark\n"
         "  --size      그림 크기(창으로 열 때는 창 크기). 기본 1600x1000");
 }
