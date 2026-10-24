@@ -53,6 +53,45 @@ target_compile_definitions(VisualMarkdown PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0
 target_compile_options(VisualMarkdown PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
 
 ################################################################################
+# VisualMarkdownView : 4층 위젯(QtWidgets). 그래프 · 행렬 · 차트를 QPainter 로 그린다(design/Views.md §3 · §7)
+#   Qt5 Gui · Widgets 도 LGPLv3 모듈이라 반드시 동적 링크한다. Qt Charts(GPLv3 전용)는 쓰지 않는다.
+#   서브모듈로 붙으면 EXCLUDE_FROM_ALL 이라 쓰는 쪽이 링크할 때만 빌드된다. 그때 Widgets 가 없으면 이 타깃을 만들지 않는다.
+################################################################################
+if(PROJECT_IS_TOP_LEVEL)
+    find_package(Qt5 5.15 REQUIRED COMPONENTS Gui Widgets)
+else()
+    find_package(Qt5 5.15 QUIET COMPONENTS Gui Widgets)
+endif()
+
+if(TARGET Qt5::Widgets)
+    foreach(VISUALMARKDOWN_QT_MODULE IN ITEMS Gui Widgets)
+        get_target_property(VISUALMARKDOWN_QT_MODULE_TYPE Qt5::${VISUALMARKDOWN_QT_MODULE} TYPE)
+        if(NOT VISUALMARKDOWN_QT_MODULE_TYPE STREQUAL "SHARED_LIBRARY")
+            message(FATAL_ERROR
+                "Qt5::${VISUALMARKDOWN_QT_MODULE} must be a shared library to keep LGPLv3 compliance "
+                "(found: ${VISUALMARKDOWN_QT_MODULE_TYPE}).")
+        endif()
+    endforeach()
+
+    file(GLOB_RECURSE VISUALMARKDOWN_VIEW_SOURCES CONFIGURE_DEPENDS
+        ${VISUALMARKDOWN_CORE_SOURCE_DIR}/UI/*.h
+        ${VISUALMARKDOWN_CORE_SOURCE_DIR}/UI/*.cpp)
+    add_library(VisualMarkdownView STATIC ${VISUALMARKDOWN_VIEW_SOURCES})
+    add_library(VisualMarkdown::VisualMarkdownView ALIAS VisualMarkdownView)
+    set_target_properties(VisualMarkdownView PROPERTIES
+        AUTOMOC ON
+        CXX_EXTENSIONS OFF)
+    if(NOT PROJECT_IS_TOP_LEVEL)
+        set_target_properties(VisualMarkdownView PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
+    target_compile_features(VisualMarkdownView PUBLIC cxx_std_17)
+    # 쓰는 쪽은 #include <VisualMarkdown/UI/KnowledgeGraphView.h> 로 쓴다(include 경로는 VisualMarkdown 에서 받는다).
+    target_link_libraries(VisualMarkdownView PUBLIC VisualMarkdown Qt5::Widgets)
+    target_compile_definitions(VisualMarkdownView PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+    target_compile_options(VisualMarkdownView PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
+endif()
+
+################################################################################
 # Tests (Qt Test, 개발용 — Ocean 빌드에는 끼지 않는다)
 ################################################################################
 if(VISUALMARKDOWN_BUILD_TESTS)
@@ -90,4 +129,29 @@ if(VISUALMARKDOWN_BUILD_TESTS)
         set_tests_properties(VisualMarkdownTests VisualMarkdownTestMainTest
                              PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_TEST_ENVIRONMENT}")
     endif()
+
+    # 위젯 시험(QtWidgets)은 따로 실행 파일로 둔다. tests/view/ 만 모은다(위의 tests/*.cpp 는 하위 폴더를 보지 않는다).
+    find_package(Qt5 5.15 REQUIRED COMPONENTS Widgets)
+    file(GLOB VISUALMARKDOWN_VIEW_TEST_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/view/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/view/*.h)
+    add_executable(VisualMarkdownViewTests ${VISUALMARKDOWN_VIEW_TEST_SOURCES})
+    set_target_properties(VisualMarkdownViewTests PROPERTIES
+        AUTOMOC ON
+        CXX_EXTENSIONS OFF)
+    target_link_libraries(VisualMarkdownViewTests PRIVATE VisualMarkdownView Qt5::Test)
+    # VISUALMARKDOWN_SNAPSHOT_DIR 환경 변수를 정하면 시험이 그린 그림을 PNG 로 남긴다(정하지 않으면 아무것도 쓰지 않는다).
+    target_compile_definitions(VisualMarkdownViewTests PRIVATE
+        QT_DISABLE_DEPRECATED_BEFORE=0x050F00
+        VISUALMARKDOWN_SHOWCASE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/showcase/wiki")
+    target_compile_options(VisualMarkdownViewTests PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
+    add_test(NAME VisualMarkdownViewTests COMMAND VisualMarkdownViewTests)
+    # 화면 없이 돈다(offscreen). Windows 의 offscreen 은 시스템 글꼴을 몰라 글꼴 폴더를 알려 준다(한글이 그려지게).
+    set(VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT "QT_QPA_PLATFORM=set:offscreen")
+    if(WIN32)
+        list(APPEND VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT ${VISUALMARKDOWN_TEST_ENVIRONMENT})
+        file(TO_CMAKE_PATH "$ENV{WINDIR}/Fonts" VISUALMARKDOWN_WINDOWS_FONT_DIR)
+        list(APPEND VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT "QT_QPA_FONTDIR=set:${VISUALMARKDOWN_WINDOWS_FONT_DIR}")
+    endif()
+    set_tests_properties(VisualMarkdownViewTests PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT}")
 endif()
