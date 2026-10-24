@@ -72,7 +72,7 @@ VisualMarkdownViewerOptions VisualMarkdownViewerOptions::Parse(const QStringList
             if (options.bSizeGiven)
                 options.strError = QStringLiteral("%1 을 두 번 줬다").arg(strArgument);
             else if (iWidth < 1 || iHeight < 1 || iWidth > kMaxSide || iHeight > kMaxSide)
-                options.strError = QStringLiteral("잘못된 %1 값: %2 (가로x세로, 한 변은 1–%3, 예: 1600x1000)").arg(strArgument, strValue, QString::number(kMaxSide));
+                options.strError = QStringLiteral("잘못된 %1 값: %2 (가로x세로, 한 변은 1-%3, 예: 1600x1000)").arg(strArgument, strValue, QString::number(kMaxSide));
             options.size = QSize(iWidth, iHeight);
             options.bSizeGiven = true;
         }

@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextCodec>
 
 #include <algorithm>
 #include <memory>
@@ -16,6 +17,7 @@ namespace
 constexpr int kGraphFiles = 6;
 constexpr int kChartFiles = 12;
 const QSize kSmallSize(800, 500);
+constexpr const char* kConsoleCodec = "CP949";   // 한국어 Windows 의 콘솔 글자표(시스템 코드 페이지에 기대지 않게 이름으로 고른다)
 
 VisualMarkdownViewerOptions MakeOptions(const QString& wiki, const QString& folder)
 {
@@ -173,6 +175,34 @@ private slots:
         QCOMPARE(VisualMarkdownViewerSnapshot::Run(MakeOptions(ViewerTestSupport::GetShowcaseDir(), strFile), &vecErrors),
                  VisualMarkdownViewerExit::kWriteFailed);
         QVERIFY2(vecErrors.join(QLatin1Char('\n')).contains(strFile), qUtf8Printable(vecErrors.join(QLatin1Char('\n'))));
+    }
+
+    // 보기 앱은 스냅샷 실패 까닭을 콘솔 글자표(toLocal8Bit)로 표준 오류에 쓴다. 한국어 Windows(CP949)에서 글자를 잃지 않게
+    // 실패 까닭의 모든 갈래(wiki 폴더 없음 · documents/concepts 없음 · 폴더를 못 만듦 · 파일을 못 씀)가 CP949 로 바뀌어야 한다
+    void errorTextsKeepInConsoleCodePage()
+    {
+        const QTextCodec* pCodec = QTextCodec::codecForName(kConsoleCodec);
+        QVERIFY(pCodec != nullptr);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QStringList vecErrors;
+        QCOMPARE(VisualMarkdownViewerSnapshot::Run(MakeOptions(dir.filePath(QStringLiteral("no-such-wiki")), dir.filePath(QStringLiteral("out-1"))), &vecErrors),
+                 VisualMarkdownViewerExit::kWikiNotRead);
+        const QString strEmptyWiki = dir.filePath(QStringLiteral("empty-wiki"));
+        QVERIFY(QDir().mkpath(strEmptyWiki));
+        QCOMPARE(VisualMarkdownViewerSnapshot::Run(MakeOptions(strEmptyWiki, dir.filePath(QStringLiteral("out-2"))), &vecErrors),
+                 VisualMarkdownViewerExit::kWikiNotRead);
+        const QString strFile = dir.filePath(QStringLiteral("file"));
+        QVERIFY(ViewerTestSupport::WriteText(strFile, QStringLiteral("not a folder")));
+        QCOMPARE(VisualMarkdownViewerSnapshot::Run(MakeOptions(ViewerTestSupport::GetShowcaseDir(), strFile), &vecErrors),
+                 VisualMarkdownViewerExit::kWriteFailed);
+        const QString strBlocked = dir.filePath(QStringLiteral("blocked"));
+        QVERIFY(QDir().mkpath(QDir(strBlocked).filePath(QStringLiteral("graph-network.png"))));   // PNG 자리에 폴더가 있다
+        QCOMPARE(VisualMarkdownViewerSnapshot::Run(MakeOptions(ViewerTestSupport::GetShowcaseDir(), strBlocked), &vecErrors),
+                 VisualMarkdownViewerExit::kWriteFailed);
+        QCOMPARE(vecErrors.size(), 4);
+        for (const QString& strError : vecErrors)
+            QVERIFY2(pCodec->canEncode(strError), qUtf8Printable(strError));
     }
 };
 
