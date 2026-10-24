@@ -3,7 +3,7 @@
 마크다운 파일을 그래프로 볼 수 있게 하는 **파일 규칙**과, 그 규칙대로 읽고 쓰는 **Qt5 C++ 라이브러리**. Ocean 의 지식 형식(형식 1판)에서 떼어 낸다. Ocean 은 이 저장소를 git 서브모듈로 붙여 쓴다.
 
 - 작성일: 2026-10-23
-- 상태: 2단계(1층 · 1+층을 라이브러리로 옮기기)까지 했다. 3단계(Ocean 에 붙이기)부터는 아직이다(§7).
+- 상태: 3단계까지 했다. Ocean 브랜치 `visualmarkdown-submodule` 에 서브모듈로 붙였고, Ocean main 에 합치는 것은 Ocean 의 UI 작업이 커밋된 뒤에 한다(§7).
 - 바탕: Ocean [지식 형식 스펙](../Ocean/docs/superpowers/specs/2026-10-22-knowledge-format-design.md) §1–§4(계획 ② 반영본)와 Ocean `main` 6d539cc 의 `src/Document/Knowledge/*`. 스펙과 코드가 다른 곳은 코드를 따랐다.
 
 ## 1. 무엇인가
@@ -163,18 +163,19 @@ Ocean/
 
 - 타깃: `add_library(VisualMarkdown STATIC …)` + 별칭 `VisualMarkdown::VisualMarkdown`. C++17, `Qt5::Core`, `target_include_directories(VisualMarkdown PUBLIC src)`.
 - 테스트는 이 저장소가 최상위 프로젝트일 때만 만든다(`VISUALMARKDOWN_BUILD_TESTS`: 최상위면 ON, 서브모듈이면 OFF). Ocean 빌드에 라이브러리 테스트가 끼지 않는다.
-- include: Ocean 에게 이 라이브러리는 외부 라이브러리다. `docs/CppConvention.md` §9 대로 `<>` 로 쓰고 외부 라이브러리 묶음에 둔다.
+- include: Ocean 에게 이 라이브러리는 외부 라이브러리다. `docs/CppConvention.md` §9 대로 `<>` 로 쓰고 외부 라이브러리 묶음에 둔다. Ocean 이 Eigen · Vulkan 을 두는 방식처럼 Qt 헤더와는 빈 줄로 나눈다(3단계에서 Ocean `src/Document/LearnLibrary.cpp` 가 이렇게 바뀌었다).
 
 ```cpp
+#include "pch.h"
 #include "Document/LearnLibrary.h"
 
-#include "Core/Observers.h"
+#include "Document/Analysis/SourceFileInfo.h"
 
-#include <VisualMarkdown/KnowledgeBase.h>
-#include <VisualMarkdown/KnowledgeTypes.h>
-#include <QString>
+#include <VisualMarkdown/KnowledgeText.h>
+#include <VisualMarkdown/KnowledgeVocabulary.h>
 
-#include <optional>
+#include <QCryptographicHash>
+#include <QDir>
 ```
 
 - 리소스: 정적 라이브러리의 qrc 는 저절로 붙지 않는다. `KnowledgeVocabulary::Get()` 이 처음 불릴 때 `Q_INIT_RESOURCE(VisualMarkdown)` 를 부른다. 경로는 `:/visualmarkdown/vocabulary.json`(Ocean 의 `:/knowledge/` 와 겹치지 않게). Ocean 의 `resources/knowledge/vocabulary.json` 은 지운다.
@@ -190,15 +191,16 @@ Ocean/
 | --- | --- | --- |
 | 1 | 파일 규칙(`format/`) · 어휘(`resources/`) · 예시(`examples/`) · 코드 규칙(`docs/`) · 이 README | 끝 |
 | 2 | 라이브러리 뼈대(`CMakeLists.txt` · `tests/`)를 만들고 1층 · 1+층(§5.1)과 그 테스트를 옮긴다. `examples/wiki` 를 읽고 다시 쓰면 바이트가 같은지 보는 테스트를 더한다. Ocean 은 아직 그대로다 | `VisualMarkdownTests` 통과 — 끝(6개 클래스, 82개 통과) |
-| 3 | Ocean 에 서브모듈로 붙이고 1층 사본을 지운다. 검사기는 라이브러리의 이름 정리를 부른다(§6) | 전체 `OceanTests` 통과, 동작 바뀜 없음 |
+| 3 | Ocean 에 서브모듈로 붙이고 1층 사본을 지운다. 검사기는 라이브러리의 이름 정리를 부른다(§6) | 전체 `OceanTests` 통과, 동작 바뀜 없음 — 브랜치에서 끝(98개 클래스 1622개 통과, 6d539cc 기준과 클래스마다 같음. 새로 받은 클론에서도 같음). main 합치기는 남음 |
 | 4 | 2층: `KnowledgeBase` 를 나눠 라이브러리로 옮기고 저장 API 를 바꾼다. Ocean 에 어댑터를 만든다(§5.3) | 두 쪽 테스트 통과, §5.4 기준 |
 | 5(나중) | 3층 보기 모델 | 보기 스펙에서 정한다 |
 | 6(나중) | 4층 위젯, 별도 타깃 `VisualMarkdownView` | 보기 스펙에서 정한다 |
 
 - 서브모듈 붙이기(3)를 `KnowledgeBase` 나누기(4)보다 먼저 한다. Ocean 어댑터가 라이브러리의 `UpsertConcept` · `SaveDocument` 를 부르려면 라이브러리가 먼저 붙어 있어야 한다. 단계마다 두 쪽 테스트가 모두 통과한 채로 끝난다.
 - 2–4단계 코드는 [`../CLAUDE.md`](../CLAUDE.md)의 순서를 따른다: 구현 에이전트(테스트 → 옮기기 → 통과) → 리뷰 에이전트(`docs/` 규칙으로 정리 → 통과). 옮기기는 동작을 바꾸지 않는다.
-- VisualMarkdown 은 아직 git 저장소가 아니다. 2단계 전에 `git init` 하고 원격(서브모듈 URL)을 정한다.
-- 학습 메뉴 ② 가 아직 진행 중이다(Ocean `main` 6d539cc 은 그 "진행분" 병합). 그 작업이 `KnowledgeBase` · Reader · Writer 를 쓰므로, 3–4단계는 학습 메뉴 ② 가 끝난 뒤에 하거나 그 작업과 맞춰서 한다.
+- 원격: Ocean 의 `.gitmodules` 는 상대 주소 `../VisualMarkdown.git` 을 쓴다(Ocean 원격 `advanced-eyes/Ocean` 옆의 `advanced-eyes/VisualMarkdown`). 원격 저장소를 만들고 VisualMarkdown 을 먼저 push 해야, Ocean 을 받는 다른 사람이 서브모듈을 받을 수 있다. 원격이 생기기 전에는 이 PC 의 Ocean 저장소 설정(`submodule.external/VisualMarkdown.url`)이 로컬 경로를 가리킨다. 그래서 로컬 경로로 서브모듈을 받을 때는 `git -c protocol.file.allow=always submodule update --init` 으로 받는다.
+- 3단계는 Ocean 브랜치 `visualmarkdown-submodule`(작업 폴더 `Project/Ocean-vm`, 6d539cc 에서 갈라짐)에 있다. Ocean main 작업 폴더에 커밋하지 않은 UI 작업이 있어, main 에 합치는 것은 그 작업이 커밋된 뒤에 한다. 겹치는 파일은 `CMakeLists.txt` · `tests/TestMain.cpp` 다. 합친 뒤 main 에서 서브모듈을 받고 전체 `OceanTests` 를 다시 돌린다.
+- 4단계(저장 API)는 학습 메뉴 ② 의 남은 작업(Task 8 이 `KnowledgeBase` 저장을 쓴다)이 끝난 뒤에 하거나 그 작업과 맞춰서 한다.
 
 ## 8. 코드 규칙
 
