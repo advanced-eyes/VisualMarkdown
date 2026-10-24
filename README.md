@@ -35,6 +35,8 @@ VisualMarkdown/
 ├── examples/
 │   ├── wiki/              정준 예시(Ocean 이 쓰는 모양 그대로). 형식 문서에 붙은 테스트 픽스처  (1단계)
 │   └── showcase/          모든 보기를 시험하는 예시 wiki(문서 6 · 개념 32)와 보기마다의 기대값
+├── design/
+│   └── Views.md           보기 설계(5 · 6단계): 색인 · 배치 · 차트 · 위젯 · 보기 앱
 ├── docs/                  코드 규칙. Ocean docs/ 에서 복사                              (1단계)
 │   ├── CppConvention.md
 │   ├── Qt.md
