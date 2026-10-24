@@ -61,10 +61,12 @@ if(VISUALMARKDOWN_BUILD_TESTS)
         AUTOMOC ON
         CXX_EXTENSIONS OFF)
     target_link_libraries(VisualMarkdownTests PRIVATE VisualMarkdown Qt5::Test)
-    # Ocean 에서 테스트가 받던 것과 같게 옛 API 를 막는다. ExampleWikiTest 는 정준 예시 폴더(examples/wiki)를 읽는다.
+    # Ocean 에서 테스트가 받던 것과 같게 옛 API 를 막는다. ExampleWikiTest 는 정준 예시 폴더(examples/wiki)를,
+    # ShowcaseWikiTest 는 보기 시험용 예시 폴더(examples/showcase/wiki)를 읽는다.
     target_compile_definitions(VisualMarkdownTests PRIVATE
         QT_DISABLE_DEPRECATED_BEFORE=0x050F00
-        VISUALMARKDOWN_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/wiki")
+        VISUALMARKDOWN_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/wiki"
+        VISUALMARKDOWN_SHOWCASE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/showcase/wiki")
     target_compile_options(VisualMarkdownTests PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
     add_test(NAME VisualMarkdownTests COMMAND VisualMarkdownTests)
     # 첫 인자(클래스 이름) 시험: 모르는 이름이면 아무것도 돌지 않으므로 실패로 끝나야 한다(tests/TestMainTest.cmake).

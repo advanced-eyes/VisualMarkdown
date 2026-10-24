@@ -17,7 +17,8 @@ constexpr int kUnknownClassExitCode = 1;   // 첫 인자와 맞는 클래스가 
     X(KnowledgeVocabularyTest) \
     X(KnowledgeMarkdownReaderTest) \
     X(KnowledgeMarkdownWriterTest) \
-    X(ExampleWikiTest)
+    X(ExampleWikiTest) \
+    X(ShowcaseWikiTest)
 
 // 테스트 파일마다 이 선언대로 Create<클래스>() 를 둔다. GCC 는 반환 형이 달라도 링크하므로(링크 이름에 반환 형이 없다) 꼭 맞춘다.
 #define VISUALMARKDOWN_DECLARE_TEST(Name) std::unique_ptr<QObject> Create##Name();

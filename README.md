@@ -32,7 +32,9 @@ VisualMarkdown/
 ├── resources/
 │   ├── vocabulary.json    어휘의 기계판. Ocean resources/knowledge/vocabulary.json 과 같다  (1단계)
 │   └── VisualMarkdown.qrc vocabulary.json 을 :/visualmarkdown/ 에 넣는다                    (2단계)
-├── examples/wiki/         정준 예시(Ocean 이 쓰는 모양 그대로). 테스트 픽스처로도 쓴다       (1단계)
+├── examples/
+│   ├── wiki/              정준 예시(Ocean 이 쓰는 모양 그대로). 형식 문서에 붙은 테스트 픽스처  (1단계)
+│   └── showcase/          모든 보기를 시험하는 예시 wiki(문서 6 · 개념 32)와 보기마다의 기대값
 ├── docs/                  코드 규칙. Ocean docs/ 에서 복사                              (1단계)
 │   ├── CppConvention.md
 │   ├── Qt.md
@@ -53,7 +55,7 @@ VisualMarkdown/
 | 파일을 읽는 프로그램 · 보기를 만든다 | 위 전부 + ReadWrite → Visualization |
 | 라이브러리 코드를 고친다 | 위 전부 + `docs/` 세 문서 |
 
-예시는 [examples/wiki](examples/wiki/)에 있다. 문서 파일 하나(관계 셋 · 표 둘)와 개념 파일 다섯이다.
+예시는 [examples/wiki](examples/wiki/)에 있다. 문서 파일 하나(관계 셋 · 표 둘)와 개념 파일 다섯이다. 보기를 만들거나 시험할 때는 [examples/showcase](examples/showcase/)를 쓴다. 문서 6 · 개념 32 로 모든 보기와 차트 경우를 담았고, 보기마다 볼 것과 기대값을 적었다.
 
 ## 4. 출처 대응
 
