@@ -1,3 +1,4 @@
+#include "VisualMarkdown/KnowledgeIndex.h"
 #include "VisualMarkdown/KnowledgeMarkdownReader.h"
 #include "VisualMarkdown/KnowledgeText.h"
 #include "VisualMarkdown/KnowledgeTypes.h"
@@ -16,7 +17,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
-#include <utility>
+#include <optional>
 
 namespace
 {
@@ -290,6 +291,26 @@ QString MakeEdgeText(const QString& from, const QString& kind, const QString& to
     return from + QLatin1Char(' ') + kind + QLatin1Char(' ') + to;
 }
 
+QString MakeEdgeText(const KnowledgeEdge& edge)
+{
+    return MakeEdgeText(edge.strFromId, edge.strKind, edge.strToId);
+}
+
+// "from 종류 to" 글로 선을 찾는다
+std::optional<KnowledgeEdge> FindEdge(const QVector<KnowledgeEdge>& edges, const QString& edgeText)
+{
+    for (const KnowledgeEdge& edge : edges)
+        if (MakeEdgeText(edge) == edgeText)
+            return edge;
+    return std::nullopt;
+}
+
+// 선의 출처 수: 그 관계를 말한 문서 수, 개념 파일에도 적혔으면 하나 더
+int CountSources(const KnowledgeEdge& edge)
+{
+    return edge.vecDocumentIds.size() + (edge.bFromConceptFile ? 1 : 0);
+}
+
 QString GetKindName(EColumnKind kind)
 {
     if (kind == EColumnKind::QUANTITY)
@@ -338,95 +359,14 @@ struct ShowcaseConcept
     bool bHasRelationSection = false;
 };
 
-// 합친 선 하나
-struct IndexEdge
-{
-    QString strFrom, strKind, strTo;
-    ERelationStatus eStatus = ERelationStatus::PROPOSED;
-    int iLines = 0;               // 이 선이 된 관계 줄 수
-    QSet<QString> setDocuments;   // 이 관계를 말한 문서
-    bool bConceptFile = false;    // 개념 파일에도 적혔다
-    bool bHasNote = false;        // 어느 줄에든 설명이 있다
-};
-
-// 색인 규칙(format/Visualization.md §2)대로 모은 것. 라이브러리에는 아직 색인이 없어(README §7 의 4단계) 시험이 직접 센다.
-struct ShowcaseIndex
-{
-    QMap<QString, IndexEdge> mapEdges;         // "from 종류 to" 글(MakeEdgeText) → 선
-    QStringList vecDropped;                    // 개념 파일이 없는 쪽을 가리켜 빠진 관계("from 종류 to" 글)
-    QMap<QString, QSet<QString>> mapPointed;   // 문서 → 그 문서가 가리키는 개념 id(카드 개념 · 관계 from/to · 표 concepts)
-    QSet<QString> setReferenced;               // 문서가 가리키거나 개념 파일 관계에 나오는 개념 id
-};
-
-ShowcaseIndex BuildIndex(const QVector<ShowcaseDocument>& documents, const QMap<QString, ShowcaseConcept>& concepts)
-{
-    const KnowledgeVocabulary& vocabulary = KnowledgeVocabulary::Get();
-    ShowcaseIndex index;
-    // 관계 줄 하나를 선에 더한다. document 가 비면 개념 파일의 줄이다.
-    // from 이나 to 의 개념 파일이 없으면 넣지 않고, 방향 없는 종류는 두 id 를 글자 순으로 놓아 합친다.
-    const auto funcAddRelation = [&](const KnowledgeRelation& relation, const QString& document)
-    {
-        QString strFrom = relation.fromConcept.strConceptId;
-        QString strTo = relation.toConcept.strConceptId;
-        if (!concepts.contains(strFrom) || !concepts.contains(strTo))
-        {
-            index.vecDropped << MakeEdgeText(strFrom, relation.strKind, strTo);
-            return;
-        }
-        if (vocabulary.IsUndirected(relation.strKind) && strTo < strFrom)
-            std::swap(strFrom, strTo);
-        IndexEdge& edge = index.mapEdges[MakeEdgeText(strFrom, relation.strKind, strTo)];
-        edge.strFrom = strFrom;
-        edge.strKind = relation.strKind;
-        edge.strTo = strTo;
-        ++edge.iLines;
-        if (relation.eStatus == ERelationStatus::CONFIRMED)
-            edge.eStatus = ERelationStatus::CONFIRMED;
-        if (!relation.strNote.isEmpty())
-            edge.bHasNote = true;
-        if (document.isEmpty())
-            edge.bConceptFile = true;
-        else
-            edge.setDocuments.insert(document);
-    };
-
-    for (const ShowcaseDocument& doc : documents)
-    {
-        QSet<QString>& setPointed = index.mapPointed[doc.strName];
-        for (const KnowledgeCard& card : doc.document.vecCards)
-            for (const ConceptLink& link : card.vecConcepts)
-                setPointed.insert(link.strConceptId);
-        for (const KnowledgeRelation& relation : doc.document.vecRelations)
-        {
-            setPointed.insert(relation.fromConcept.strConceptId);
-            setPointed.insert(relation.toConcept.strConceptId);
-            funcAddRelation(relation, doc.strName);
-        }
-        for (const KnowledgeTable& table : doc.document.vecTables)
-            for (const QString& strConceptId : table.vecConceptIds)
-                setPointed.insert(strConceptId);
-        index.setReferenced += setPointed;
-    }
-    for (const ShowcaseConcept& concept : concepts)
-    {
-        for (const KnowledgeRelation& relation : concept.concept.vecRelations)
-        {
-            index.setReferenced.insert(relation.fromConcept.strConceptId);
-            index.setReferenced.insert(relation.toConcept.strConceptId);
-            funcAddRelation(relation, QString());
-        }
-    }
-    return index;
-}
-
 // 선으로 이어진 점들의 덩어리 크기(방향은 보지 않는다), 큰 것부터
-QList<int> CountComponentSizes(const QStringList& concepts, const QMap<QString, IndexEdge>& edges)
+QList<int> CountComponentSizes(const QStringList& concepts, const QVector<KnowledgeEdge>& edges)
 {
     QHash<QString, QStringList> hashNeighbors;
-    for (const IndexEdge& edge : edges)
+    for (const KnowledgeEdge& edge : edges)
     {
-        hashNeighbors[edge.strFrom] << edge.strTo;
-        hashNeighbors[edge.strTo] << edge.strFrom;
+        hashNeighbors[edge.strFromId] << edge.strToId;
+        hashNeighbors[edge.strToId] << edge.strFromId;
     }
     QSet<QString> setSeen;
     QList<int> vecSizes;
@@ -457,14 +397,14 @@ QList<int> CountComponentSizes(const QStringList& concepts, const QMap<QString, 
 }
 
 // examples/showcase/wiki(보기를 시험하는 예시)가 라이브러리가 쓰는 정준 모양인지,
-// 그리고 examples/showcase/README.md 의 기대값이 라이브러리가 읽은 기록에서 그대로 나오는지 본다.
+// 그리고 examples/showcase/README.md 의 기대값이 라이브러리가 읽은 기록과 색인(KnowledgeIndex)에서 그대로 나오는지 본다.
 // 실패하면 기대값을 시험에 맞춰 고치지 않는다. 예시 · README · 라이브러리 가운데 틀린 쪽을 찾는다.
 class ShowcaseWikiTest : public QObject
 {
     Q_OBJECT
 
 private slots:
-    // 모든 파일을 한 번 읽어 기록과 색인을 만든다
+    // 모든 파일을 한 번 읽어 기록을 만들고, 같은 폴더로 색인을 읽는다
     void initTestCase()
     {
         for (const QString& strPath : WikiTestFiles::ListMarkdownFiles(MakeShowcasePath(WikiTestFiles::kDocumentsFolder)))
@@ -491,10 +431,12 @@ private slots:
             QVERIFY2(!strId.contains(QLatin1Char(' ')), qUtf8Printable(strPath));
             m_mapConcepts.insert(strId, { result.concept, WikiTestFiles::HasSection(strText, DecodeUtf8("관계")) });
         }
-        m_index = BuildIndex(m_vecDocuments, m_mapConcepts);
+        for (const ShowcaseDocument& doc : m_vecDocuments)
+            m_hashDocumentNames.insert(doc.document.strId, doc.strName);
+        m_bIndexLoaded = m_index.Load(QStringLiteral(VISUALMARKDOWN_SHOWCASE_DIR));
     }
 
-    // 파일 목록은 돌 때마다 폴더에서 훑는다
+    // 파일 목록은 돌 때마다 폴더에서 훑는다. 색인도 같은 파일을 경고 없이 다 읽는다
     void showcaseFilesAreFound()
     {
         const QString strDocuments = MakeShowcasePath(WikiTestFiles::kDocumentsFolder);
@@ -503,6 +445,11 @@ private slots:
         QVERIFY2(QDir(strConcepts).exists(), qUtf8Printable(strConcepts));
         QCOMPARE(WikiTestFiles::ListMarkdownFiles(strDocuments).size(), kDocumentFileCount);
         QCOMPARE(WikiTestFiles::ListMarkdownFiles(strConcepts).size(), kConceptFileCount);
+
+        QVERIFY2(m_bIndexLoaded, VISUALMARKDOWN_SHOWCASE_DIR);
+        QVERIFY2(m_index.GetWarnings().isEmpty(), qUtf8Printable(m_index.GetWarnings().join(QLatin1Char('\n'))));
+        QCOMPARE(m_index.ListDocuments().size(), kDocumentFileCount);
+        QCOMPARE(m_index.ListConcepts(true).size(), kConceptFileCount);
     }
 
     void documentRewriteIsByteExact_data()
@@ -573,14 +520,15 @@ private slots:
     // §2.1: 선 36. 종류 · 방향 · 상태별 수
     void edges()
     {
-        QCOMPARE(m_index.mapEdges.size(), kEdgeCount);
+        const QVector<KnowledgeEdge> vecEdges = m_index.ListEdges();
+        QCOMPARE(vecEdges.size(), kEdgeCount);
         const KnowledgeVocabulary& vocabulary = KnowledgeVocabulary::Get();
         QMap<QString, int> mapByKind;
         int iDirected = 0;
         int iUndirected = 0;
         int iConfirmed = 0;
         int iProposed = 0;
-        for (const IndexEdge& edge : m_index.mapEdges)
+        for (const KnowledgeEdge& edge : vecEdges)
         {
             ++mapByKind[edge.strKind];
             if (vocabulary.IsUndirected(edge.strKind))
@@ -603,10 +551,12 @@ private slots:
     // §2.1: 합쳐지는 선 3개(상태 · 출처)와 빠지는 선 1개
     void mergedAndDroppedEdges()
     {
+        // 합쳐지는 선: 출처(말한 문서 · 개념 파일)가 둘 이상인 선
+        const QVector<KnowledgeEdge> vecEdges = m_index.ListEdges();
         QStringList vecMerged;
-        for (const IndexEdge& edge : m_index.mapEdges)
-            if (edge.iLines > 1)
-                vecMerged << MakeEdgeText(edge.strFrom, edge.strKind, edge.strTo);
+        for (const KnowledgeEdge& edge : vecEdges)
+            if (CountSources(edge) > 1)
+                vecMerged << MakeEdgeText(edge);
         QStringList vecExpected;
         for (const ExpectedMergedEdge& expected : kMergedEdges)
             vecExpected << DecodeUtf8(expected.pEdge);
@@ -616,13 +566,16 @@ private slots:
         for (const ExpectedMergedEdge& expected : kMergedEdges)
         {
             const QString strEdge = DecodeUtf8(expected.pEdge);
-            QVERIFY2(m_index.mapEdges.contains(strEdge), qUtf8Printable(strEdge));
-            const IndexEdge edge = m_index.mapEdges.value(strEdge);
-            QCOMPARE(DescribeMergedEdge(strEdge, edge.eStatus, JoinSorted(ToList(edge.setDocuments)), edge.bConceptFile),
+            const std::optional<KnowledgeEdge> optEdge = FindEdge(vecEdges, strEdge);
+            QVERIFY2(optEdge.has_value(), qUtf8Printable(strEdge));
+            QCOMPARE(DescribeMergedEdge(strEdge, optEdge->eStatus, JoinSorted(ListDocumentNames(optEdge->vecDocumentIds)), optEdge->bFromConceptFile),
                      DescribeMergedEdge(strEdge, expected.eStatus, JoinSorted(expected.vecDocuments), expected.bConceptFile));
         }
 
-        const QString strDropped = DiffItems(DecodeUtf8("빠지는 선"), m_index.vecDropped, kDroppedRelations);
+        QStringList vecDropped;
+        for (const KnowledgeDroppedRelation& dropped : m_index.ListDroppedRelations())
+            vecDropped << MakeEdgeText(dropped.strFromId, dropped.strKind, dropped.strToId);
+        const QString strDropped = DiffItems(DecodeUtf8("빠지는 선"), vecDropped, kDroppedRelations);
         QVERIFY2(strDropped.isEmpty(), qUtf8Printable(strDropped));
     }
 
@@ -634,16 +587,16 @@ private slots:
         QStringList vecSameYear;
         QStringList vecIsA;
         QStringList vecProposedIsA;
-        for (const IndexEdge& edge : m_index.mapEdges)
+        for (const KnowledgeEdge& edge : m_index.ListEdges())
         {
-            const QString strEdge = MakeEdgeText(edge.strFrom, edge.strKind, edge.strTo);
+            const QString strEdge = MakeEdgeText(edge);
             if (edge.strKind == QLatin1String("improves"))
             {
                 vecImproves << strEdge;
-                if (!edge.bHasNote)
+                if (edge.vecNotes.isEmpty())
                     vecImprovesWithoutNote << strEdge;
-                const QString strFromYear = m_mapConcepts.value(edge.strFrom).concept.strYear;
-                if (!strFromYear.isEmpty() && strFromYear == m_mapConcepts.value(edge.strTo).concept.strYear)
+                const QString strFromYear = GetYear(edge.strFromId);
+                if (!strFromYear.isEmpty() && strFromYear == GetYear(edge.strToId))
                     vecSameYear << strEdge;
             }
             else if (edge.strKind == QLatin1String("isA"))
@@ -669,9 +622,9 @@ private slots:
     void visibleConcepts()
     {
         QStringList vecHidden;
-        for (auto it = m_mapConcepts.cbegin(); it != m_mapConcepts.cend(); ++it)
-            if (!m_index.setReferenced.contains(it.key()))
-                vecHidden << it.key();
+        for (const KnowledgeConcept& concept : m_index.ListConcepts(true))
+            if (m_index.IsHidden(concept.strId))
+                vecHidden << concept.strId;
         const QString strHidden = DiffItems(DecodeUtf8("숨는 점"), vecHidden, kHiddenConcepts);
         QVERIFY2(strHidden.isEmpty(), qUtf8Printable(strHidden));
 
@@ -685,11 +638,12 @@ private slots:
         const QString strWithoutDocuments = DiffItems(DecodeUtf8("다루는 문서가 없는 점"), vecWithoutDocuments, kConceptsWithoutDocuments);
         QVERIFY2(strWithoutDocuments.isEmpty(), qUtf8Printable(strWithoutDocuments));
 
+        const QVector<KnowledgeEdge> vecEdges = m_index.ListEdges();
         QSet<QString> setEndpoints;
-        for (const IndexEdge& edge : m_index.mapEdges)
+        for (const KnowledgeEdge& edge : vecEdges)
         {
-            setEndpoints.insert(edge.strFrom);
-            setEndpoints.insert(edge.strTo);
+            setEndpoints.insert(edge.strFromId);
+            setEndpoints.insert(edge.strToId);
         }
         QStringList vecWithoutEdges;
         for (const QString& strId : vecVisible)
@@ -698,7 +652,7 @@ private slots:
         const QString strWithoutEdges = DiffItems(DecodeUtf8("선 없는 점"), vecWithoutEdges, kConceptsWithoutEdges);
         QVERIFY2(strWithoutEdges.isEmpty(), qUtf8Printable(strWithoutEdges));
 
-        QCOMPARE(JoinNumbers(CountComponentSizes(vecVisible, m_index.mapEdges)), JoinNumbers(kComponentSizes));
+        QCOMPARE(JoinNumbers(CountComponentSizes(vecVisible, vecEdges)), JoinNumbers(kComponentSizes));
     }
 
     // §2.1 다루는 문서가 많은 점 · §2.2 문서 ↔ 개념: 개념마다 문서 수, 문서마다 개념 수
@@ -719,23 +673,44 @@ private slots:
         const QString strDocumentCounts = DiffItems(DecodeUtf8("다루는 문서 수가 1 이 아닌 점"), MakeCountItems(mapOtherThanOne), MakeCountItems(mapExpectedOtherThanOne));
         QVERIFY2(strDocumentCounts.isEmpty(), qUtf8Printable(strDocumentCounts));
 
+        // 문서마다 가리키는 개념 수: 개념마다 색인이 주는 가리키는 문서(ListDocumentIdsPointingTo)를 거꾸로 센다.
+        // 개념 파일이 없는 id(darknet-53)도 세야 하므로, 셀 id 는 문서 기록의 카드 링크 · 관계 끝 · 표 concepts 에서 모은다.
+        const QVector<KnowledgeDocument> vecDocuments = m_index.ListDocuments();
+        QSet<QString> setCandidateIds;
+        for (const KnowledgeDocument& document : vecDocuments)
+        {
+            for (const KnowledgeCard& card : document.vecCards)
+                for (const ConceptLink& link : card.vecConcepts)
+                    setCandidateIds.insert(link.strConceptId);
+            for (const KnowledgeRelation& relation : document.vecRelations)
+            {
+                setCandidateIds.insert(relation.fromConcept.strConceptId);
+                setCandidateIds.insert(relation.toConcept.strConceptId);
+            }
+            for (const KnowledgeTable& table : document.vecTables)
+                for (const QString& strConceptId : table.vecConceptIds)
+                    setCandidateIds.insert(strConceptId);
+        }
         QMap<QString, int> mapPointed;
-        for (auto it = m_index.mapPointed.cbegin(); it != m_index.mapPointed.cend(); ++it)
-            mapPointed.insert(it.key(), it.value().size());
+        for (const KnowledgeDocument& document : vecDocuments)
+            mapPointed.insert(GetDocumentName(document.strId), 0);
+        for (const QString& strConceptId : setCandidateIds)
+            for (const QString& strDocumentId : m_index.ListDocumentIdsPointingTo(strConceptId))
+                ++mapPointed[GetDocumentName(strDocumentId)];
         const QString strPointed = DiffItems(DecodeUtf8("문서마다 가리키는 개념 수"), MakeCountItems(mapPointed), MakeCountItems(kPointedConceptsPerDocument));
         QVERIFY2(strPointed.isEmpty(), qUtf8Printable(strPointed));
-        QVERIFY(m_index.mapPointed.value(DecodeUtf8(kYolov3)).contains(DecodeUtf8(kMissingConcept)));
-        QVERIFY(!m_mapConcepts.contains(DecodeUtf8(kMissingConcept)));
+        QVERIFY(ListDocumentNames(m_index.ListDocumentIdsPointingTo(DecodeUtf8(kMissingConcept))).contains(DecodeUtf8(kYolov3)));
+        QVERIFY(!m_index.FindConcept(DecodeUtf8(kMissingConcept)).has_value());
     }
 
     // §2.2 관계 행렬: 종류 둘이 겹치는 칸은 하나
     void pairsWithSeveralKinds()
     {
         QMap<QString, QSet<QString>> mapPairKinds;   // 두 id(글자 순) → 종류들
-        for (const IndexEdge& edge : m_index.mapEdges)
+        for (const KnowledgeEdge& edge : m_index.ListEdges())
         {
-            const bool bFromFirst = edge.strFrom < edge.strTo;
-            const QString strPair = bFromFirst ? edge.strFrom + QLatin1Char(' ') + edge.strTo : edge.strTo + QLatin1Char(' ') + edge.strFrom;
+            const bool bFromFirst = edge.strFromId < edge.strToId;
+            const QString strPair = bFromFirst ? edge.strFromId + QLatin1Char(' ') + edge.strToId : edge.strToId + QLatin1Char(' ') + edge.strFromId;
             mapPairKinds[strPair].insert(edge.strKind);
         }
         QStringList vecSeveral;
@@ -757,9 +732,9 @@ private slots:
         QMap<QString, int> mapPerYear;
         int iWithYear = 0;
         int iWithoutYear = 0;
-        for (const QString& strId : ListVisibleConcepts())
+        for (const KnowledgeConcept& concept : m_index.ListConcepts())
         {
-            const QString strYear = m_mapConcepts.value(strId).concept.strYear;
+            const QString strYear = concept.strYear;
             if (strYear.isEmpty())
             {
                 ++iWithoutYear;
@@ -773,28 +748,22 @@ private slots:
         QCOMPARE(iWithYear, kVisibleConceptsWithYear);
         QCOMPARE(iWithoutYear, kVisibleConceptsWithoutYear);
         for (const QString& strHidden : kHiddenConcepts)
-            QVERIFY2(m_mapConcepts.contains(strHidden), qUtf8Printable(strHidden));
-        QCOMPARE(m_mapConcepts.value(QStringLiteral("dpm")).concept.strYear, DecodeUtf8(kHiddenDpmYear));
+            QVERIFY2(m_index.FindConcept(strHidden).has_value(), qUtf8Printable(strHidden));   // 숨은 점도 id 로는 찾는다
+        QCOMPARE(GetYear(QStringLiteral("dpm")), DecodeUtf8(kHiddenDpmYear));
     }
 
     // §2.1 문서 순서: learned 가 늦은 것부터(같으면 id 순)
     void documentOrder()
     {
-        for (const ShowcaseDocument& doc : m_vecDocuments)
-            QVERIFY2(QDateTime::fromString(doc.document.strLearned, Qt::ISODate).isValid(),
-                     qUtf8Printable(doc.strName + DecodeUtf8(": ") + doc.document.strLearned));
-        QVector<ShowcaseDocument> vecSorted = m_vecDocuments;
-        std::sort(vecSorted.begin(), vecSorted.end(), [](const ShowcaseDocument& a, const ShowcaseDocument& b)
-        {
-            const QDateTime dtA = QDateTime::fromString(a.document.strLearned, Qt::ISODate);
-            const QDateTime dtB = QDateTime::fromString(b.document.strLearned, Qt::ISODate);
-            if (dtA != dtB)
-                return dtA > dtB;
-            return a.document.strId < b.document.strId;
-        });
+        const QVector<KnowledgeDocument> vecDocuments = m_index.ListDocuments();
         QStringList vecNames;
-        for (const ShowcaseDocument& doc : vecSorted)
-            vecNames << doc.strName;
+        for (const KnowledgeDocument& document : vecDocuments)
+        {
+            const QString strName = GetDocumentName(document.strId);
+            QVERIFY2(QDateTime::fromString(document.strLearned, Qt::ISODate).isValid(),
+                     qUtf8Printable(strName + DecodeUtf8(": ") + document.strLearned));
+            vecNames << strName;
+        }
         QCOMPARE(vecNames, kDocumentsByLearned);   // 다르면 처음 다른 자리를 보여 준다
     }
 
@@ -1053,30 +1022,47 @@ private:
         return false;
     }
 
-    // 숨지 않는 점: 개념 파일이 있고, 문서가 가리키거나 개념 파일 관계에 나온다
+    // 숨지 않는 점(색인의 ListConcepts): 개념 파일이 있고, 문서가 가리키거나 개념 파일 관계에 나온다
     QStringList ListVisibleConcepts() const
     {
         QStringList vecVisible;
-        for (auto it = m_mapConcepts.cbegin(); it != m_mapConcepts.cend(); ++it)
-            if (m_index.setReferenced.contains(it.key()))
-                vecVisible << it.key();
+        for (const KnowledgeConcept& concept : m_index.ListConcepts())
+            vecVisible << concept.strId;
         return vecVisible;
     }
 
     // 이 개념을 가리키는 문서 수(한 문서는 한 번)
     int CountDocuments(const QString& conceptId) const
     {
-        int iCount = 0;
-        for (const QSet<QString>& setPointed : m_index.mapPointed)
-            if (setPointed.contains(conceptId))
-                ++iCount;
-        return iCount;
+        return m_index.ListDocumentIdsPointingTo(conceptId).size();
+    }
+
+    QString GetYear(const QString& conceptId) const
+    {
+        const std::optional<KnowledgeConcept> optConcept = m_index.FindConcept(conceptId);
+        return optConcept.has_value() ? optConcept->strYear : QString();
+    }
+
+    // 기대값은 문서를 파일 이름으로 적었다. 색인의 문서 id(머리글 id)를 파일 이름으로 바꾼다(모르는 id 는 그대로)
+    QString GetDocumentName(const QString& documentId) const
+    {
+        return m_hashDocumentNames.value(documentId, documentId);
+    }
+
+    QStringList ListDocumentNames(const QStringList& documentIds) const
+    {
+        QStringList vecNames;
+        for (const QString& strId : documentIds)
+            vecNames << GetDocumentName(strId);
+        return vecNames;
     }
 
 private:
     QVector<ShowcaseDocument> m_vecDocuments;       // 파일 이름 순
     QMap<QString, ShowcaseConcept> m_mapConcepts;   // id(파일 이름) → 개념
-    ShowcaseIndex m_index;
+    QHash<QString, QString> m_hashDocumentNames;    // 문서 머리글 id → 파일 이름
+    KnowledgeIndex m_index;                         // 같은 wiki 폴더를 읽은 색인
+    bool m_bIndexLoaded = false;
 };
 
 std::unique_ptr<QObject> CreateShowcaseWikiTest() { return std::make_unique<ShowcaseWikiTest>(); }

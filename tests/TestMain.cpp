@@ -17,6 +17,7 @@ constexpr int kUnknownClassExitCode = 1;   // 첫 인자와 맞는 클래스가 
     X(KnowledgeVocabularyTest) \
     X(KnowledgeMarkdownReaderTest) \
     X(KnowledgeMarkdownWriterTest) \
+    X(KnowledgeIndexTest) \
     X(ExampleWikiTest) \
     X(ShowcaseWikiTest)
 
