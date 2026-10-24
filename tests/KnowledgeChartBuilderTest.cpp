@@ -2,9 +2,11 @@
 #include "VisualMarkdown/Algorithm/ChartBuilder/Common/ChartTypes.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/KnowledgeChartBuilder.h"
 #include "VisualMarkdown/KnowledgeIndex.h"
+#include "VisualMarkdown/KnowledgeText.h"
 #include "VisualMarkdown/KnowledgeTypes.h"
 
 #include <QMap>
+#include <QSet>
 #include <QTest>
 
 #include <algorithm>
@@ -15,7 +17,7 @@
 namespace
 {
 // ================================================================================================
-// 기대값: examples/showcase/README.md §3 의 표 12개와 design/Views.md §6 의 차트 규칙이다.
+// 기대값: examples/showcase/README.md §3 의 표 13개와 design/Views.md §6 · design/MoreViews.md §4 의 차트 규칙이다.
 // 예시를 고치면 README · ShowcaseWikiTest 와 함께 여기를 고친다.
 // ================================================================================================
 
@@ -25,13 +27,14 @@ constexpr const char* kInputSizeTable = "입력 크기에 따른 정확도와 �
 constexpr const char* kVocDetectorsTable = "검출기별 VOC 2007 정확도";
 constexpr const char* kCocoTable = "입력 크기별 COCO 정확도";
 constexpr const char* kTimeTable = "처리 시간과 AP50";
+constexpr const char* kCocoDetectorsTable = "검출기별 COCO 정확도";
 constexpr const char* kTwoStageVocTable = "2단계 검출기의 VOC 2007 정확도";
 constexpr const char* kTrainTestTimeTable = "학습 · 시험 시간";
 constexpr const char* kMonthlyTable = "월별 응답 시간";
 constexpr const char* kPaymentMethodTable = "결제 수단별 비중";
 constexpr const char* kLoadTable = "동시 사용자와 응답 시간";
 constexpr const char* kPriorityTable = "기능 우선순위";
-constexpr int kTableCount = 12;
+constexpr int kTableCount = 13;
 
 // 표마다의 시작 차트: 종류, 계열(이름 · 단위 · 축), y 축(단위 · 이름), x 축(이름 · 단위 · 범주), 밑글
 struct ExpectedChart
@@ -67,6 +70,12 @@ const QVector<ExpectedChart> kCharts {
       { "320", "416", "608" }, "COCO test-dev · 그림 1 · 그림 3" },
     // ordered 가 없는 숫자 x 는 수치: 산점도
     { kTimeTable, EChartType::SCATTER, { "AP50" }, { "%" }, { "0" }, { "%" }, { "AP50" }, "시간", "ms", {}, "COCO test-dev · Titan X · 그림 3" },
+    // 범주 x 에 계열 여섯(y 여섯): 히트맵. 색 눈금은 y 열마다 하나라 단위가 같아도 축이 여섯이다
+    { kCocoDetectorsTable, EChartType::HEATMAP, { "AP", "AP50", "AP75", "APS", "APM", "APL" }, { "%", "%", "%", "%", "%", "%" },
+      { "0", "1", "2", "3", "4", "5" }, { "%", "%", "%", "%", "%", "%" }, { "AP", "AP50", "AP75", "APS", "APM", "APL" }, "검출기", "",
+      { "Faster R-CNN+++", "Faster R-CNN w FPN", "Faster R-CNN by G-RMI", "Faster R-CNN w TDM", "YOLOv2", "SSD513", "DSSD513", "RetinaNet R-101",
+        "RetinaNet X-101", "YOLOv3 608×608" },
+      "COCO test-dev · 표 3" },
     { kTwoStageVocTable, EChartType::BAR, { "mAP" }, { "%" }, { "0" }, { "%" }, { "mAP" }, "방법", "", { "R-CNN", "Fast R-CNN", "Faster R-CNN" },
       "VOC 2007 test · VGG16 · VOC 2007 trainval 학습 · Fast R-CNN 표 4 · Faster R-CNN 표 3" },
     // 나란한 막대, 단위가 달라(h · s) 축 둘, 빈 값
@@ -148,7 +157,31 @@ const QVector<QStringList> kNegativeRows { { "-100", "-10" }, { "-50", "-5" }, {
 const QVector<double> kNegativeXTicks { -120, -100, -80, -60, -40, -20, 0 };   // x -100–-2
 const QVector<double> kNegativeYTicks { -12, -10, -8, -6, -4, -2, 0 };         // y -10–-0.1
 
-const QVector<EChartType> kDrawnTypes { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER };
+// 히트맵(검출기별 COCO 정확도): 칸 값(행 = 검출기, 열 = AP · AP50 · AP75 · APS · APM · APL)과 y 열마다의 색 눈금(그 열의 가장 작은 값 · 가장 큰 값)
+const QVector<QVector<double>> kCocoDetectorValues {
+    { 34.9, 55.7, 37.4, 15.6, 38.7, 50.9 }, { 36.2, 59.1, 39.0, 18.2, 39.0, 48.2 }, { 34.7, 55.5, 36.7, 13.5, 38.1, 52.0 },
+    { 36.8, 57.7, 39.2, 16.2, 39.8, 52.1 }, { 21.6, 44.0, 19.2, 5.0, 22.4, 35.5 },  { 31.2, 50.4, 33.3, 10.2, 34.5, 49.8 },
+    { 33.2, 53.3, 35.2, 13.0, 35.4, 51.1 }, { 39.1, 59.1, 42.3, 21.8, 42.7, 50.2 }, { 40.8, 61.1, 44.1, 24.1, 44.2, 51.2 },
+    { 33.0, 57.9, 34.4, 18.3, 35.4, 41.9 },
+};
+struct ExpectedScale
+{
+    const char* pTitle;
+    double dMin;
+    double dMax;
+};
+const QVector<ExpectedScale> kCocoDetectorScales {
+    { "AP", 21.6, 40.8 }, { "AP50", 44.0, 61.1 }, { "AP75", 19.2, 44.1 }, { "APS", 5.0, 24.1 }, { "APM", 22.4, 44.2 }, { "APL", 35.5, 52.1 },
+};
+constexpr const char* kCocoDetectorsAsBarTitle = "AP · AP50 · AP75 · APS · APM · APL";   // 막대로 바꾸면 단위(%)마다 축 하나
+
+// 추천(design/MoreViews.md §4.2): x 가 범주이고 계열(수치인 y 열 수 × series 값 수)이 넷 이상이면 히트맵
+constexpr int kHeatmapMinSeries = 4;
+// 겹친 칸 경고(§4.1): 행 번호 · x 글 · 계열 이름
+constexpr const char* kDuplicateCellWarning = "%1행: 같은 칸(x \"%2\" · 계열 \"%3\")이 겹쳐 이 행을 뺀다";
+constexpr const char* kThirdUnitWord = "셋째 이후 단위";   // 규칙 4 의 경고(히트맵에는 없다)
+
+const QVector<EChartType> kDrawnTypes { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP };
 
 // 규칙 4
 constexpr int kMaxYAxes = 2;               // 왼쪽 · 오른쪽
@@ -179,6 +212,7 @@ QString GetTypeName(EChartType type)
     case EChartType::STEP_BAR: return QStringLiteral("STEP_BAR");
     case EChartType::LINE: return QStringLiteral("LINE");
     case EChartType::SCATTER: return QStringLiteral("SCATTER");
+    case EChartType::HEATMAP: return QStringLiteral("HEATMAP");
     }
     return QStringLiteral("?");
 }
@@ -452,6 +486,72 @@ QStringList CheckMargin(const QString& what, double min, double max, const QVect
     return vecProblems;
 }
 
+// 범주 x 축: 범주만 있고(눈금 없음) 범위는 -0.5 … 범주 수 - 0.5
+QStringList CheckCategoryAxis(const ChartAxis& xAxis)
+{
+    QStringList vecProblems;
+    const int iCategories = xAxis.vecCategories.size();
+    if (!xAxis.vecTicks.isEmpty())
+        vecProblems << QStringLiteral("범주 x 축에 눈금이 있다");
+    if (xAxis.dMin != -kCategoryHalfWidth || xAxis.dMax != std::max(iCategories, 1) - kCategoryHalfWidth)
+        vecProblems << QStringLiteral("범주 x 축 범위 %1–%2").arg(FormatNumber(xAxis.dMin), FormatNumber(xAxis.dMax));
+    return vecProblems;
+}
+
+// 범주 x 의 점: dX 가 범주 자리이고 x 칸 글이 그 범주 이름표다
+QStringList CheckCategoryPoint(const QString& what, const ChartPoint& point, const ChartAxis& xAxis)
+{
+    const int iCategory = static_cast<int>(point.dX);
+    if (point.dX != iCategory || iCategory < 0 || iCategory >= xAxis.vecCategories.size())
+        return { what + QStringLiteral(": 범주 자리가 아니다 ") + FormatNumber(point.dX) };
+    if (xAxis.vecCategories[iCategory] != point.strLabel)
+        return { what + QStringLiteral(": 범주 이름표 ") + xAxis.vecCategories[iCategory] + QStringLiteral(" 와 다르다") };
+    return {};
+}
+
+// 히트맵(design/MoreViews.md §4.1): 행은 범주 x, 계열마다 범주 하나에 점 하나까지(겹친 칸은 뺀다).
+// 색 눈금(y 축)은 눈금이 없고 범위는 그 축 계열 값의 가장 작은 값 · 가장 큰 값 그대로다(값이 없으면 0 · 0)
+QStringList CheckHeatmapSpec(const ChartSpec& spec)
+{
+    QStringList vecProblems = CheckCategoryAxis(spec.xAxis);
+    if (spec.vecYAxes.isEmpty())
+        vecProblems << QStringLiteral("히트맵에 색 눈금이 없다");
+    for (const ChartSeries& series : spec.vecSeries)
+    {
+        if (series.iAxis < 0 || series.iAxis >= spec.vecYAxes.size())
+        {
+            vecProblems << series.strName + QStringLiteral(": 없는 축 %1").arg(series.iAxis);
+            continue;
+        }
+        QSet<int> setCategories;
+        for (const ChartPoint& point : series.vecPoints)
+        {
+            const QString strPoint = series.strName + QStringLiteral(" / ") + point.strLabel;
+            if (!std::isfinite(point.dX) || (point.optY && !std::isfinite(*point.optY)) || point.dBase != 0)
+                vecProblems << strPoint + QStringLiteral(": 유한하지 않은 값이거나 시작 값이 0 이 아니다");
+            vecProblems << CheckCategoryPoint(strPoint, point, spec.xAxis);
+            const int iCategory = static_cast<int>(point.dX);
+            if (setCategories.contains(iCategory))
+                vecProblems << strPoint + QStringLiteral(": 한 계열에 같은 범주의 점이 둘이다");
+            setCategories.insert(iCategory);
+        }
+    }
+    for (int iAxis = 0; iAxis < spec.vecYAxes.size(); ++iAxis)
+    {
+        const ChartAxis& axis = spec.vecYAxes[iAxis];
+        const QString strWhat = QStringLiteral("색 눈금 %1(%2)").arg(iAxis).arg(axis.strTitle);
+        if (!axis.vecTicks.isEmpty())
+            vecProblems << strWhat + QStringLiteral(": 눈금이 있다");
+        const QVector<double> vecValues = ListYValues(spec, iAxis);
+        const double dMin = vecValues.isEmpty() ? 0 : *std::min_element(vecValues.cbegin(), vecValues.cend());
+        const double dMax = vecValues.isEmpty() ? 0 : *std::max_element(vecValues.cbegin(), vecValues.cend());
+        if (axis.dMin != dMin || axis.dMax != dMax)
+            vecProblems << strWhat + QStringLiteral(": 범위 %1–%2 가 값의 %3–%4 가 아니다")
+                                         .arg(FormatNumber(axis.dMin), FormatNumber(axis.dMax), FormatNumber(dMin), FormatNumber(dMax));
+    }
+    return vecProblems;
+}
+
 // 차트 설정이 앞뒤가 맞는지(종류를 바꿔도 지켜야 하는 것)
 QStringList CheckSpec(const ChartSpec& spec)
 {
@@ -466,6 +566,8 @@ QStringList CheckSpec(const ChartSpec& spec)
             vecProblems << QStringLiteral("NONE 인데 까닭이 없다");
         return vecProblems;
     }
+    if (spec.eType == EChartType::HEATMAP)
+        return CheckHeatmapSpec(spec);
     const bool bCategorical = spec.eType != EChartType::SCATTER;
     const bool bBars = spec.eType == EChartType::BAR || spec.eType == EChartType::STEP_BAR;
     if (spec.vecYAxes.isEmpty() || spec.vecYAxes.size() > kMaxYAxes)
@@ -544,7 +646,8 @@ QString DescribeProblems(const QString& what, const QStringList& problems)
 }
 }
 
-// 지식 안 차트 설정(KnowledgeChartBuilder, design/Views.md §6)을 showcase 표 12개(examples/showcase/README.md §3)와 작은 합성 표로 시험한다.
+// 지식 안 차트 설정(KnowledgeChartBuilder, design/Views.md §6 · design/MoreViews.md §4)을 showcase 표 13개(examples/showcase/README.md §3)와
+// 작은 합성 표로 시험한다.
 // 표마다의 시작 차트 · 계열 · 축 · 빈 값 · 밑글, 숫자 읽기, 눈금, 종류를 바꿔도 앞뒤가 맞는 설정이 나오는지를 본다.
 class KnowledgeChartBuilderTest : public QObject
 {
@@ -769,7 +872,8 @@ private slots:
         }
     }
 
-    // 종류를 정하면(보기 앱에서 사용자가 고르면) 그 종류로 그린다. 계열 · 축 · 밑글은 그대로이고 설정은 앞뒤가 맞는다
+    // 종류를 정하면(보기 앱에서 사용자가 고르면) 그 종류로 그린다. 계열 · 축 · 밑글은 그대로이고 설정은 앞뒤가 맞는다.
+    // 축은 막대 · 단계 막대 · 선 · 산점도가 단위마다, 히트맵이 y 열마다라 같은 쪽끼리 견준다(다른 쪽은 heatmapScalesFollowYColumns · heatmapTableAsOtherCharts)
     void forcedTypesStayConsistent()
     {
         for (const ExpectedChart& expected : kCharts)
@@ -784,12 +888,265 @@ private slots:
                 QCOMPARE(spec.strTitle, DecodeUtf8(expected.pTitle));
                 QCOMPARE(spec.strCaption, DecodeUtf8(expected.pCaption));
                 QCOMPARE(ListSeriesNames(spec), expected.vecSeries);
-                QCOMPARE(ListSeriesAxes(spec), expected.vecSeriesAxes);
-                QCOMPARE(ListAxisUnits(spec), expected.vecAxisUnits);
+                if ((eType == EChartType::HEATMAP) == (expected.eType == EChartType::HEATMAP) || expected.eType == EChartType::NONE)
+                {
+                    QCOMPARE(ListSeriesAxes(spec), expected.vecSeriesAxes);
+                    QCOMPARE(ListAxisUnits(spec), expected.vecAxisUnits);
+                }
                 const QStringList vecProblems = CheckSpec(spec);
                 QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(DescribeProblems(strCase, vecProblems)));
             }
         }
+    }
+
+    // 히트맵(검출기별 COCO 정확도): 행은 검출기 10(표 순서), 열은 AP … APL 여섯(점 10개씩, 빈 값 없음).
+    // 색 눈금은 y 열마다 하나이고 범위는 그 열의 가장 작은 값 · 가장 큰 값 그대로다. 바탕 네트워크 열은 읽지 않고 경고도 없다
+    void heatmapShowcaseTable()
+    {
+        const KnowledgeTable& table = GetTable(kCocoDetectorsTable);
+        const ChartSpec spec = BuildChart(table);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::HEATMAP));
+        QVERIFY2(spec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(spec)));
+        QCOMPARE(spec.xAxis.vecCategories.size(), kCocoDetectorValues.size());
+        QCOMPARE(spec.vecSeries.size(), kCocoDetectorScales.size());
+        QCOMPARE(spec.vecYAxes.size(), kCocoDetectorScales.size());
+        for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
+        {
+            const ChartSeries& series = spec.vecSeries[iSeries];
+            QCOMPARE(series.iAxis, iSeries);
+            QStringList vecExpectedYs;
+            QStringList vecExpectedXs;
+            for (int iRow = 0; iRow < kCocoDetectorValues.size(); ++iRow)
+            {
+                vecExpectedYs << FormatNumber(kCocoDetectorValues[iRow][iSeries]);
+                vecExpectedXs << FormatNumber(iRow);
+            }
+            QCOMPARE(ListYs(series), vecExpectedYs);
+            QCOMPARE(ListXs(series), vecExpectedXs);
+            QCOMPARE(ListLabels(series), spec.xAxis.vecCategories);
+
+            const ChartAxis& axis = spec.vecYAxes[iSeries];
+            const ExpectedScale& expected = kCocoDetectorScales[iSeries];
+            QCOMPARE(axis.strTitle, DecodeUtf8(expected.pTitle));
+            QCOMPARE(axis.strUnit, QStringLiteral("%"));
+            QCOMPARE(FormatNumber(axis.dMin), FormatNumber(expected.dMin));
+            QCOMPARE(FormatNumber(axis.dMax), FormatNumber(expected.dMax));
+            QVERIFY2(axis.vecTicks.isEmpty(), qUtf8Printable(axis.strTitle));
+        }
+        const QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+    }
+
+    // 히트맵 표를 다른 차트로 바꾸면 축은 단위마다(%) 하나로 돌아간다. 계열 · 범주는 그대로다
+    void heatmapTableAsOtherCharts()
+    {
+        const KnowledgeTable& table = GetTable(kCocoDetectorsTable);
+        const ChartSpec heatmap = BuildChart(table);
+        for (const EChartType eType : { EChartType::BAR, EChartType::LINE, EChartType::STEP_BAR })
+        {
+            const ChartSpec spec = BuildChart(table, eType);
+            QCOMPARE(GetTypeName(spec.eType), GetTypeName(eType));
+            QCOMPARE(ListSeriesNames(spec), ListSeriesNames(heatmap));
+            QStringList vecLeftAxes;
+            for (int iSeries = 0; iSeries < heatmap.vecSeries.size(); ++iSeries)
+                vecLeftAxes << QStringLiteral("0");
+            QCOMPARE(ListSeriesAxes(spec), vecLeftAxes);
+            QCOMPARE(ListAxisUnits(spec), QStringList { "%" });
+            QCOMPARE(ListAxisTitles(spec), QStringList { DecodeUtf8(kCocoDetectorsAsBarTitle) });
+            QCOMPARE(spec.xAxis.vecCategories, heatmap.xAxis.vecCategories);
+            QVERIFY2(spec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(spec)));
+        }
+    }
+
+    // 다른 표를 히트맵으로 정하면: 색 눈금은 수치인 y 열마다 하나(y 순서, 이름 · 단위는 그 열), 계열의 축은 그 y 열 자리다.
+    // 계열 순서는 y × series 값이라 계열 i 의 y 열은 i / (series 값 수)다
+    void heatmapScalesFollowYColumns()
+    {
+        for (const ExpectedChart& expected : kCharts)
+        {
+            if (expected.eType == EChartType::NONE)
+                continue;
+            const KnowledgeTable& table = GetTable(expected.pTitle);
+            const ChartSpec spec = BuildChart(table, EChartType::HEATMAP);
+            const QString strCase = DecodeUtf8(expected.pTitle);
+            QVERIFY2(spec.eType == EChartType::HEATMAP, qUtf8Printable(strCase));
+            QStringList vecTitles;
+            QStringList vecUnits;
+            for (const QString& strY : table.vecY)
+            {
+                const int iColumn = FindColumn(table, strY);
+                if (KnowledgeText::ClassifyColumn(table, iColumn) != EColumnKind::QUANTITY)
+                    continue;
+                vecTitles << strY;
+                vecUnits << table.vecColumns[iColumn].strUnit;
+            }
+            QStringList vecGroups;
+            const int iSeriesColumn = FindColumn(table, table.strSeries);
+            for (const QStringList& vecRow : table.vecRows)
+                if (iSeriesColumn >= 0 && !vecRow.value(iSeriesColumn).trimmed().isEmpty() && !vecGroups.contains(vecRow.value(iSeriesColumn).trimmed()))
+                    vecGroups << vecRow.value(iSeriesColumn).trimmed();
+            const int iGroups = std::max(1, static_cast<int>(vecGroups.size()));
+            QStringList vecSeriesAxes;
+            for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
+                vecSeriesAxes << QString::number(iSeries / iGroups);
+            QCOMPARE(ListAxisTitles(spec), vecTitles);
+            QCOMPARE(ListAxisUnits(spec), vecUnits);
+            QCOMPARE(ListSeriesAxes(spec), vecSeriesAxes);
+            QCOMPARE(ListSeriesNames(spec), expected.vecSeries);
+            QVERIFY2(!HasWarningAbout(spec, DecodeUtf8(kThirdUnitWord)), qUtf8Printable(DescribeWarnings(spec)));
+            const QStringList vecProblems = CheckSpec(spec);
+            QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(DescribeProblems(strCase, vecProblems)));
+        }
+    }
+
+    // 추천 경계(§4.2): x 가 범주이고 계열이 넷 이상이면 히트맵. 계열 수 = 수치인 y 열 수 × series 값(빈 칸이 아닌 것) 수.
+    // 순서 · 수치 x 는 계열이 많아도 그대로(선 · 단계 막대 · 산점도)
+    void recommendHeatmapFromSeriesCount()
+    {
+        const auto funcTable = [](int yCount, const QStringList& groups, const QStringList& ordered = QStringList(), bool cumulative = false)
+        {
+            QVector<KnowledgeColumn> vecColumns { MakeColumn("방법") };
+            QStringList vecY;
+            for (int iY = 0; iY < yCount; ++iY)
+            {
+                vecY << QStringLiteral("y%1").arg(iY + 1);
+                vecColumns << MakeColumn(vecY.last(), QStringLiteral("%"));
+            }
+            vecColumns << MakeColumn("구분");
+            QVector<QStringList> vecRows;
+            const QStringList vecRowGroups = groups.isEmpty() ? QStringList { QString() } : groups;
+            for (int iRow = 0; iRow < vecRowGroups.size(); ++iRow)
+            {
+                QStringList vecRow { QStringLiteral("A") };
+                for (int iY = 0; iY < yCount; ++iY)
+                    vecRow << QString::number(iRow + iY + 1);
+                vecRow << vecRowGroups[iRow];
+                vecRows << vecRow;
+            }
+            return MakeTable(vecColumns, vecRows, "방법", vecY, groups.isEmpty() ? QString() : QStringLiteral("구분"), ordered, cumulative);
+        };
+        struct RecommendCase
+        {
+            const char* pName;
+            KnowledgeTable table;
+            EChartType eType;
+        };
+        const QVector<RecommendCase> vecCases {
+            { "y 셋", funcTable(3, {}), EChartType::BAR },
+            { "y 넷", funcTable(kHeatmapMinSeries, {}), EChartType::HEATMAP },
+            { "y 여섯", funcTable(6, {}), EChartType::HEATMAP },
+            { "y 하나 × series 셋", funcTable(1, { "a", "b", "c" }), EChartType::BAR },
+            { "y 하나 × series 넷", funcTable(1, { "a", "b", "c", "d" }), EChartType::HEATMAP },
+            { "y 둘 × series 둘", funcTable(2, { "a", "b" }), EChartType::HEATMAP },
+            { "y 하나 × series 셋(빈 칸 · 같은 값은 세지 않는다)", funcTable(1, { "a", "b", "", "c", "a" }), EChartType::BAR },
+            { "순서 x · y 여섯", funcTable(6, {}, { "방법" }), EChartType::LINE },
+            { "순서 x · cumulative · y 여섯", funcTable(6, {}, { "방법" }, true), EChartType::STEP_BAR },
+        };
+        for (const RecommendCase& recommendCase : vecCases)
+            QVERIFY2(KnowledgeChartBuilder::Recommend(recommendCase.table) == recommendCase.eType,
+                     qUtf8Printable(DecodeUtf8(recommendCase.pName) + QStringLiteral(": ") + GetTypeName(KnowledgeChartBuilder::Recommend(recommendCase.table))));
+
+        // 수치가 아닌 y 는 세지 않는다: y 넷 가운데 하나가 범주면 셋이라 막대(그 열은 빼고 경고)
+        KnowledgeTable dropped = funcTable(kHeatmapMinSeries, {});
+        for (QStringList& vecRow : dropped.vecRows)
+            vecRow[kHeatmapMinSeries] = QStringLiteral("높음");
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(dropped)), GetTypeName(EChartType::BAR));
+        // 수치 x 는 계열이 많아도 산점도
+        const KnowledgeTable numeric = MakeTable({ MakeColumn("x"), MakeColumn("a"), MakeColumn("b"), MakeColumn("c"), MakeColumn("d") },
+                                                 { { "1", "1", "2", "3", "4" }, { "2", "5", "6", "7", "8" } }, "x", { "a", "b", "c", "d" });
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(numeric)), GetTypeName(EChartType::SCATTER));
+        // 추천된 히트맵은 그대로 그린다
+        const ChartSpec spec = BuildChart(funcTable(2, { "a", "b" }));
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::HEATMAP));
+        QCOMPARE(ListSeriesNames(spec), (QStringList { "y1 · a", "y1 · b", "y2 · a", "y2 · b" }));
+    }
+
+    // 색 눈금은 y 열마다 하나이고, series 값으로 나뉜 계열(같은 y)은 한 눈금을 함께 쓴다. 단위가 셋이어도 경고가 없다
+    void heatmapScaleSharedAcrossGroups()
+    {
+        const QVector<KnowledgeColumn> vecColumns { MakeColumn("방법"), MakeColumn("AP", "%"), MakeColumn("FPS"), MakeColumn("지연", "ms"),
+                                                    MakeColumn("크기", "MB"), MakeColumn("구분") };
+        const QVector<QStringList> vecRows {
+            { "A", "30", "40", "25", "100", "가" }, { "B", "50", "20", "", "120", "가" },
+            { "A", "10", "90", "5", "80", "나" },   { "B", "70", "60", "15", "140", "나" },
+        };
+        const KnowledgeTable table = MakeTable(vecColumns, vecRows, "방법", { "AP", "FPS", "지연", "크기" }, "구분");
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(table)), GetTypeName(EChartType::HEATMAP));
+        const ChartSpec spec = BuildChart(table);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::HEATMAP));
+        QCOMPARE(ListSeriesNames(spec), (QStringList { "AP · 가", "AP · 나", "FPS · 가", "FPS · 나", "지연 · 가", "지연 · 나", "크기 · 가", "크기 · 나" }));
+        QCOMPARE(ListSeriesAxes(spec), (QStringList { "0", "0", "1", "1", "2", "2", "3", "3" }));
+        QCOMPARE(ListAxisTitles(spec), (QStringList { "AP", "FPS", "지연", "크기" }));
+        QCOMPARE(ListAxisUnits(spec), (QStringList { "%", "", "ms", "MB" }));
+        QCOMPARE(spec.xAxis.vecCategories, (QStringList { "A", "B" }));
+        // 두 계열(가 · 나)의 값을 함께 본 범위: AP 10–70, FPS 20–90, 지연 5–25(빈 칸은 빼고), 크기 80–140
+        const QVector<QPair<double, double>> vecRanges { { 10, 70 }, { 20, 90 }, { 5, 25 }, { 80, 140 } };
+        for (int iAxis = 0; iAxis < vecRanges.size(); ++iAxis)
+        {
+            QCOMPARE(spec.vecYAxes[iAxis].dMin, vecRanges[iAxis].first);
+            QCOMPARE(spec.vecYAxes[iAxis].dMax, vecRanges[iAxis].second);
+            QVERIFY(spec.vecYAxes[iAxis].vecTicks.isEmpty());
+        }
+        QCOMPARE(ListYs(spec.vecSeries[4]), (QStringList { "25", FormatValue(std::nullopt) }));
+        QVERIFY2(spec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(spec)));
+        const QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // 같은 표를 막대로: 단위가 넷이라 셋째부터 오른쪽 축에 두고 경고를 단다(히트맵에는 없는 경고)
+        const ChartSpec bars = BuildChart(table, EChartType::BAR);
+        QVERIFY2(HasWarningAbout(bars, DecodeUtf8(kThirdUnitWord)), qUtf8Printable(DescribeWarnings(bars)));
+        QCOMPARE(bars.vecYAxes.size(), kMaxYAxes);
+    }
+
+    // 한 계열에 같은 칸(같은 x 글 · 같은 series 값)이 둘이면 첫 점만 두고, 계열마다 경고를 단다. 뺀 값은 색 눈금 범위에 넣지 않는다
+    void heatmapDuplicateCellKeepsFirst()
+    {
+        const QVector<KnowledgeColumn> vecColumns { MakeColumn("방법"), MakeColumn("AP", "%"), MakeColumn("FPS"), MakeColumn("구분") };
+        const QVector<QStringList> vecRows {
+            { "A", "30", "40", "가" }, { "A", "10", "90", "나" }, { "A", "99", "1", "가" }, { "B", "50", "20", "가" },
+        };
+        const KnowledgeTable table = MakeTable(vecColumns, vecRows, "방법", { "AP", "FPS" }, "구분");
+        const ChartSpec spec = BuildChart(table, EChartType::HEATMAP);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::HEATMAP));
+        QCOMPARE(ListSeriesNames(spec), (QStringList { "AP · 가", "AP · 나", "FPS · 가", "FPS · 나" }));
+        QCOMPARE(spec.vecWarnings, (QStringList { DecodeUtf8(kDuplicateCellWarning).arg(3).arg(QStringLiteral("A"), QStringLiteral("AP · 가")),
+                                                  DecodeUtf8(kDuplicateCellWarning).arg(3).arg(QStringLiteral("A"), QStringLiteral("FPS · 가")) }));
+        QCOMPARE(ListYs(spec.vecSeries[0]), (QStringList { "30", "50" }));
+        QCOMPARE(ListXs(spec.vecSeries[0]), (QStringList { "0", "1" }));
+        QCOMPARE(ListYs(spec.vecSeries[2]), (QStringList { "40", "20" }));
+        QCOMPARE(spec.vecYAxes[0].dMax, 50.0);    // 뺀 99 는 넣지 않는다
+        QCOMPARE(spec.vecYAxes[1].dMin, 20.0);    // 뺀 1 은 넣지 않는다
+        QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+
+        // y 가 하나면 계열 이름은 series 값 그대로
+        const KnowledgeTable oneY = MakeTable(vecColumns, vecRows, "방법", { "AP" }, "구분");
+        const ChartSpec oneYSpec = BuildChart(oneY, EChartType::HEATMAP);
+        QCOMPARE(oneYSpec.vecWarnings, QStringList { DecodeUtf8(kDuplicateCellWarning).arg(3).arg(QStringLiteral("A"), QStringLiteral("가")) });
+        // series 열이 없으면 행마다 범주라 겹치지 않는다(같은 x 글도 두 행)
+        const KnowledgeTable noSeries = MakeTable(vecColumns, vecRows, "방법", { "AP" });
+        const ChartSpec noSeriesSpec = BuildChart(noSeries, EChartType::HEATMAP);
+        QVERIFY2(noSeriesSpec.vecWarnings.isEmpty(), qUtf8Printable(DescribeWarnings(noSeriesSpec)));
+        QCOMPARE(noSeriesSpec.xAxis.vecCategories, (QStringList { "A", "A", "A", "B" }));
+        vecProblems = CheckSpec(noSeriesSpec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
+    }
+
+    // 값이 하나도 없는 y 열의 색 눈금은 0 · 0 이다(숫자 꼴이지만 double 로 담지 못하는 칸뿐)
+    void heatmapScaleWithoutValuesIsZero()
+    {
+        const KnowledgeTable table = MakeTable({ MakeColumn("항목"), MakeColumn("값"), MakeColumn("둘째") }, { { "a", "1e999", "2" }, { "b", "", "3" } },
+                                               "항목", { "값", "둘째" });
+        const ChartSpec spec = BuildChart(table, EChartType::HEATMAP);
+        QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::HEATMAP));
+        QCOMPARE(spec.vecYAxes.size(), 2);
+        QCOMPARE(spec.vecYAxes[0].dMin, 0.0);
+        QCOMPARE(spec.vecYAxes[0].dMax, 0.0);
+        QCOMPARE(spec.vecYAxes[1].dMin, 2.0);
+        QCOMPARE(spec.vecYAxes[1].dMax, 3.0);
+        QVERIFY2(HasWarningAbout(spec, QStringLiteral("1e999")), qUtf8Printable(DescribeWarnings(spec)));
+        const QStringList vecProblems = CheckSpec(spec);
+        QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
     }
 
     // 산점도 표를 막대로: x 칸 글이 범주가 되고(series 가 있어 같은 글은 한 번), 계열은 그대로, y 축은 0 을 넣는다
@@ -964,13 +1321,15 @@ private slots:
         QVERIFY2(vecProblems.isEmpty(), qUtf8Printable(vecProblems.join(QStringLiteral(" | "))));
     }
 
-    // 규칙 4: y 단위가 셋 이상이면 셋째부터 오른쪽 축에 두고 경고를 단다. 빈 단위도 단위 하나다
+    // 규칙 4: y 단위가 셋 이상이면 셋째부터 오른쪽 축에 두고 경고를 단다. 빈 단위도 단위 하나다.
+    // 이 표는 범주 x 에 계열이 넷이라 추천은 히트맵이다(design/MoreViews.md §4.2). 막대로 정해 규칙 4 를 본다
     void thirdUnitGoesToRightAxis()
     {
         const KnowledgeTable table = MakeTable(
             { MakeColumn("방법"), MakeColumn("학습", "h"), MakeColumn("시험", "s"), MakeColumn("지연", "ms"), MakeColumn("준비", "h") },
             { { "A", "1", "2", "300", "4" }, { "B", "5", "6", "700", "8" } }, "방법", { "학습", "시험", "지연", "준비" });
-        const ChartSpec spec = BuildChart(table);
+        QCOMPARE(GetTypeName(KnowledgeChartBuilder::Recommend(table)), GetTypeName(EChartType::HEATMAP));
+        const ChartSpec spec = BuildChart(table, EChartType::BAR);
         QCOMPARE(GetTypeName(spec.eType), GetTypeName(EChartType::BAR));
         QCOMPARE(ListSeriesNames(spec), (QStringList { "학습", "시험", "지연", "준비" }));
         QCOMPARE(ListSeriesUnits(spec), (QStringList { "h", "s", "ms", "h" }));

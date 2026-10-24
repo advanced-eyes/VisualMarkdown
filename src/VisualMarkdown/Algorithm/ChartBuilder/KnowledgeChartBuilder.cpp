@@ -2,12 +2,18 @@
 
 #include "VisualMarkdown/Algorithm/ChartBuilder/Common/ChartBuilderCommon.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/BarChartCPU.h"
+#include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/HeatmapChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/LineChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/ScatterChartCPU.h"
 #include "VisualMarkdown/Algorithm/ChartBuilder/Strategy/StepBarChartCPU.h"
 #include "VisualMarkdown/KnowledgeText.h"
 
 #include <utility>
+
+namespace
+{
+constexpr int kHeatmapMinSeries = 4;   // 범주 x 에 계열이 이만큼 이상이면 히트맵(design/MoreViews.md §4.2)
+}
 
 KnowledgeChartBuilder::KnowledgeChartBuilder()
     : m_hashStrategy()
@@ -16,6 +22,7 @@ KnowledgeChartBuilder::KnowledgeChartBuilder()
     // 그리는 종류마다 전략 하나(Patterns.md §1.2). NONE 은 전략 없이 까닭만 남긴다
     std::unique_ptr<IChartBuilderStrategy> arrStrategies[] = {
         std::make_unique<BarChartCPU>(), std::make_unique<StepBarChartCPU>(), std::make_unique<LineChartCPU>(), std::make_unique<ScatterChartCPU>(),
+        std::make_unique<HeatmapChartCPU>(),
     };
     for (std::unique_ptr<IChartBuilderStrategy>& upStrategy : arrStrategies)
     {
@@ -35,7 +42,8 @@ EChartType KnowledgeChartBuilder::Recommend(const KnowledgeTable& table)
     switch (KnowledgeText::ClassifyColumn(table, columns.iX))
     {
     case EColumnKind::NOMINAL:
-        return EChartType::BAR;
+        // 계열(수치인 y 열 수 × series 값 수)이 넷부터는 나란한 막대의 값 글이 겹치고 색만으로 가르기 어렵다: 칸마다 값을 쓰는 히트맵
+        return ChartBuilderCommon::CountSeries(table, columns) >= kHeatmapMinSeries ? EChartType::HEATMAP : EChartType::BAR;
     case EColumnKind::ORDINAL:
         return table.bCumulative ? EChartType::STEP_BAR : EChartType::LINE;
     case EColumnKind::QUANTITY:

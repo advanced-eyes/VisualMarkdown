@@ -1,6 +1,7 @@
 #include "VisualMarkdown/UI/VisualMarkdownTheme.h"
 
 #include <algorithm>
+#include <cmath>
 #include <initializer_list>
 
 namespace
@@ -9,6 +10,23 @@ constexpr int kPanelAlpha = 238;            // 범례 판: 뒤의 그림이 아�
 constexpr int kLightHaloAlpha = 210;
 constexpr int kDarkHaloAlpha = 190;
 constexpr int kLinkAlpha = 150;             // 문서 ↔ 개념 선: 겹친 곳이 보이게 반쯤 비친다
+
+// 크기 눈금(design/MoreViews.md §4.4): 파랑 100 → 700. 계열 색 1(파랑)과 같은 색조다. 어두운 테마는 거꾸로 쓴다
+constexpr const char* kBlueRamp[] = { "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b" };
+constexpr double kRampMiddle = 0.5;         // 크기 눈금의 가운데(t 가 숫자가 아닐 때)
+constexpr double kRoundHalf = 0.5;
+
+// WCAG 2 상대 휘도(sRGB): 채널 → 선형 값 → 휘도. 대비는 (밝은 휘도 + 0.05) / (어두운 휘도 + 0.05)
+constexpr double kChannelMax = 255.0;
+constexpr double kLinearThreshold = 0.04045;
+constexpr double kLinearSlope = 12.92;
+constexpr double kGammaOffset = 0.055;
+constexpr double kGammaScale = 1.055;
+constexpr double kGamma = 2.4;
+constexpr double kRedWeight = 0.2126;
+constexpr double kGreenWeight = 0.7152;
+constexpr double kBlueWeight = 0.0722;
+constexpr double kContrastOffset = 0.05;
 
 QColor MakeAlpha(const char* hex, int alpha)
 {
@@ -32,6 +50,36 @@ void SetSeries(VisualMarkdownTheme* theme, std::initializer_list<const char*> co
     theme->vecSeriesColors.clear();
     for (const char* pColor : colors)
         theme->vecSeriesColors << QColor(QString::fromLatin1(pColor));
+}
+
+// 크기 눈금과 채움 위 글자. reversed 면 눈금을 거꾸로 둔다(어두운 테마)
+void SetSequential(VisualMarkdownTheme* theme, bool reversed)
+{
+    theme->vecSequentialRamp.clear();
+    for (const char* pColor : kBlueRamp)
+        theme->vecSequentialRamp << QColor(QString::fromLatin1(pColor));
+    if (reversed)
+        std::reverse(theme->vecSequentialRamp.begin(), theme->vecSequentialRamp.end());
+    theme->fillTextDark = QColor(0x00, 0x00, 0x00);
+    theme->fillTextLight = QColor(0xff, 0xff, 0xff);
+}
+
+double ToLinear(int channel)
+{
+    const double dValue = channel / kChannelMax;
+    return dValue <= kLinearThreshold ? dValue / kLinearSlope : std::pow((dValue + kGammaOffset) / kGammaScale, kGamma);
+}
+
+double GetLuminance(const QColor& color)
+{
+    return kRedWeight * ToLinear(color.red()) + kGreenWeight * ToLinear(color.green()) + kBlueWeight * ToLinear(color.blue());
+}
+
+double GetContrast(const QColor& a, const QColor& b)
+{
+    const double dA = GetLuminance(a);
+    const double dB = GetLuminance(b);
+    return (std::max(dA, dB) + kContrastOffset) / (std::min(dA, dB) + kContrastOffset);
 }
 }
 
@@ -77,6 +125,7 @@ VisualMarkdownTheme VisualMarkdownTheme::MakeLight()
     theme.stepStart = QColor(0x7d, 0x7c, 0x76);
     theme.stepIncrease = QColor(0x2a, 0x78, 0xd6);
     theme.stepDecrease = QColor(0xeb, 0x68, 0x34);
+    SetSequential(&theme, false);
     return theme;
 }
 
@@ -120,6 +169,7 @@ VisualMarkdownTheme VisualMarkdownTheme::MakeDark()
     theme.stepStart = QColor(0x8a, 0x89, 0x84);
     theme.stepIncrease = QColor(0x39, 0x87, 0xe5);
     theme.stepDecrease = QColor(0xd9, 0x59, 0x26);
+    SetSequential(&theme, true);
     return theme;
 }
 
@@ -150,4 +200,30 @@ QColor VisualMarkdownTheme::GetSeriesColor(int series) const
         return text;
     const int iCount = vecSeriesColors.size();
     return vecSeriesColors[((series % iCount) + iCount) % iCount];
+}
+
+QColor VisualMarkdownTheme::GetRampColor(double t) const
+{
+    if (vecSequentialRamp.isEmpty())
+        return text;
+    if (vecSequentialRamp.size() == 1)
+        return vecSequentialRamp.first();
+    const double dT = std::isfinite(t) ? std::clamp(t, 0.0, 1.0) : kRampMiddle;
+    // t 를 눈금 칸 자리로: 앞 색 iLower 와 다음 색 사이의 dFraction 만큼
+    const int iLast = vecSequentialRamp.size() - 1;
+    const double dPosition = dT * iLast;
+    const int iLower = std::min(static_cast<int>(std::floor(dPosition)), iLast - 1);
+    const double dFraction = dPosition - iLower;
+    const QColor& from = vecSequentialRamp[iLower];
+    const QColor& to = vecSequentialRamp[iLower + 1];
+    const auto funcMix = [dFraction](int a, int b)
+    {
+        return static_cast<int>(std::floor(a + (b - a) * dFraction + kRoundHalf));
+    };
+    return QColor(funcMix(from.red(), to.red()), funcMix(from.green(), to.green()), funcMix(from.blue(), to.blue()));
+}
+
+QColor VisualMarkdownTheme::GetFillTextColor(const QColor& fill) const
+{
+    return GetContrast(fillTextLight, fill) > GetContrast(fillTextDark, fill) ? fillTextLight : fillTextDark;
 }

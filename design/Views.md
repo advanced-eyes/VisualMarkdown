@@ -163,7 +163,7 @@ showcase 에서 나와야 하는 것(테스트로 확인한다)
 ## 6. 차트 설정
 
 ```cpp
-enum class EChartType { NONE, BAR, STEP_BAR, LINE, SCATTER };
+enum class EChartType { NONE, BAR, STEP_BAR, LINE, SCATTER, HEATMAP };   // 값은 끝에만 더한다
 
 struct ChartPoint  { double dX = 0; std::optional<double> optY; double dBase = 0; QString strLabel; };   // dBase: 막대가 시작하는 값
 struct ChartSeries { QString strName; QString strUnit; int iAxis = 0; QVector<ChartPoint> vecPoints; };
@@ -174,7 +174,7 @@ struct ChartSpec
     QString strTitle;
     QString strCaption;              // condition · where
     ChartAxis xAxis;                 // 범주 · 순서 x 는 vecCategories, 수치 x 는 범위와 눈금
-    QVector<ChartAxis> vecYAxes;     // 단위가 다르면 둘(왼쪽 · 오른쪽)
+    QVector<ChartAxis> vecYAxes;     // 단위가 다르면 둘(왼쪽 · 오른쪽). 히트맵은 y 열마다 하나(색 눈금)
     QVector<ChartSeries> vecSeries;
     QStringList vecWarnings;
 };
@@ -182,26 +182,28 @@ struct ChartSpec
 
 규칙
 1. y 열 가운데 수치(quantity)가 하나도 없으면 `NONE` 이고 경고를 단다. 보기 앱은 차트 대신 표를 보인다. 수치가 아닌 y 열은 빼고 경고를 단다.
-2. x 열 종류: 범주 → `BAR`, 순서 + `cumulative` → `STEP_BAR`, 순서 → `LINE`, 수치 → `SCATTER`.
+2. x 열 종류: 범주 → `BAR`(계열이 넷 이상이면 `HEATMAP`, 규칙 10), 순서 + `cumulative` → `STEP_BAR`, 순서 → `LINE`, 수치 → `SCATTER`.
 3. y 가 여럿이면 y 마다 계열이다. `series` 열이 있으면 그 값마다 계열을 나눈다(y 가 여럿이면 y × 값). 계열 순서는 처음 나온 순서다.
-4. y 단위가 둘이면 y 축 둘(첫 단위 왼쪽 · 둘째 오른쪽). 셋 이상이면 셋째부터는 오른쪽 축에 두고 경고를 단다.
+4. y 단위가 둘이면 y 축 둘(첫 단위 왼쪽 · 둘째 오른쪽). 셋 이상이면 셋째부터는 오른쪽 축에 두고 경고를 단다. 히트맵은 y 열마다 색 눈금이라 이 경고가 없다(규칙 10).
 5. 빈 칸은 값 없음이다. 선은 그 자리에서 끊고, 막대와 점은 그리지 않는다.
 6. 숫자는 `IsQuantityText` 와 같은 꼴로 읽는다(천 단위 쉼표 · 부호 · 지수).
 7. 축 범위: 막대 · 단계 막대는 0 을 넣는다. 선 · 산점도는 값 범위의 양쪽에 5% 여유를 두되, 값이 모두 0 이상(또는 모두 0 이하)이면 여유가 0 을 넘지 않는다. 눈금은 1 · 2 · 5 × 10ⁿ 간격으로 5–8개이고, 범위 끝은 바깥 눈금에 맞춘다. 범주 x 축은 −0.5 … 범주 수 − 0.5 이고 눈금이 없다.
 8. 단계 막대: 첫 막대는 0 부터, 그다음은 앞 값(빈 칸을 건너뛴 앞 값)에서 이 값까지. 시작 값은 `dBase` 에 담는다. 값이 있는 첫 막대는 시작 값이라 중립 색(회색)으로, 그다음은 늘어남과 줄어듦을 다른 색으로 칠한다(파랑 · 주황, 빨강 · 초록만으로 나누지 않는다). 범례는 시작 · 늘어남 · 줄어듦.
 9. 제목은 표 제목, 밑글은 `condition · where`.
+10. 히트맵([MoreViews.md §4](MoreViews.md)): 행은 x 범주(위 → 아래), 열은 계열(왼쪽 → 오른쪽). 행 놓기 · 계열은 막대와 같다. 계열 수(수치인 y 열 수 × `series` 값 가운데 빈 칸이 아닌 것의 수, `series` 가 없으면 × 1)가 넷 이상이고 x 가 범주면 추천한다. 색 눈금(`vecYAxes`)은 y 열마다 하나(y 순서, 계열의 `iAxis` 는 그 y 열 자리)이고, 범위는 그 y 열 값의 가장 작은 값 · 가장 큰 값 그대로다(여유 · 0 · 눈금 없음, 값이 없으면 0 · 0). `series` 값으로 나뉜 계열은 한 눈금을 함께 쓴다. 한 계열에 같은 칸(같은 x 글 · 같은 `series` 값)이 둘 이상이면 첫 점만 두고 계열마다 `%1행: 같은 칸(x "%2" · 계열 "%3")이 겹쳐 이 행을 뺀다` 경고를 단다.
 
-showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한다(테스트로 확인한다).
+showcase 의 표 13개가 README §3 의 시작 차트와 같게 나와야 한다(테스트로 확인한다).
 
 ## 7. 위젯
 
-- `VisualMarkdownTheme`: 바탕 · 글자 · 흐린 글자 · 격자, 개념 종류 7개(+ 모르는 종류)의 점 색, 관계 종류 5개의 선 색, AI 제안 선(점선 · 흐리게), 강조, 차트 계열 색 8개, 단계 막대의 시작 · 늘어남 · 줄어듦. 내장 기본값은 `MakeLight()` · `MakeDark()` 다. 기본 생성한 테마는 색이 비어 있으니, 쓰는 쪽(Ocean 의 mapper)은 내장 테마에서 시작해 바꾼다. 글자는 바탕 · 점 색 위에서 4.5:1, 선 · 막대는 바탕 위에서 3:1 이상의 대비를 갖는다(`VisualMarkdownThemeTest` 가 잰다).
+- `VisualMarkdownTheme`: 바탕 · 글자 · 흐린 글자 · 격자, 개념 종류 7개(+ 모르는 종류)의 점 색, 관계 종류 5개의 선 색, AI 제안 선(점선 · 흐리게), 강조, 차트 계열 색 8개, 단계 막대의 시작 · 늘어남 · 줄어듦, 크기 눈금 `vecSequentialRamp`(히트맵 칸. 밝은 테마는 파랑 100 → 700, 어두운 테마는 같은 색을 거꾸로), 채움 위 글자 `fillTextDark` · `fillTextLight`(검정 · 흰색, 채움과 대비가 큰 쪽을 쓴다). 내장 기본값은 `MakeLight()` · `MakeDark()` 다. 기본 생성한 테마는 색이 비어 있으니, 쓰는 쪽(Ocean 의 mapper)은 내장 테마에서 시작해 바꾼다. 글자는 바탕 · 점 색 위에서 4.5:1, 선 · 막대는 바탕 위에서 3:1 이상, 채움 위 글자는 크기 눈금(고르게 나눈 101곳) · 계열 색 위에서 4.5:1 이상의 대비를 갖고, 크기 눈금의 밝기는 한쪽으로 바뀐다(`VisualMarkdownThemeTest` 가 잰다).
 - `KnowledgeGraphView`(`QWidget`): 배치 결과와 점 정보(이름 · 종류 · 연도 · 정의)를 받아 그린다. 선(방향 있는 선은 화살표, AI 제안은 점선, 종류마다 색), 점(종류마다 색의 둥근 상자, 문서는 다른 모양), 타임라인 눈금 · 갈래, 연도 없는 점 목록, 범례. 확대 · 이동 · 맞춤, 마우스 올림 설명, 누르면 이웃 강조. 시그널: `ConceptActivated(id)`, `DocumentActivated(id)`.
   - 맞춤은 1배보다 키우지 않는다(배치 단위가 화면 점 1개라, 작은 그래프가 부풀어 갈래 이름과 상자 글자 크기가 어긋나지 않게). 휠로는 더 키울 수 있다.
   - 같은 열에 붙어 쌓인 두 상자(타임라인의 같은 해) 사이 선은 상자 오른쪽으로 휘어 나가는 곡선으로 그려 화살촉이 보이게 한다.
   - 개념 점 설명에는 그 개념이 개선한 것(개선 선의 대상과 `설명`)을 함께 쓴다. B 를 볼 때 A 와 무엇을 고쳤는지가 보이게 하려는 것이다(Visualization.md §3, showcase §2.2 계보도).
 - `KnowledgeMatrixView`: 행 · 열 이름, 칸 색(종류가 둘이면 칸을 대각선으로 나눈다), 마우스 올림 설명. 칸 크기는 위젯에 맞추되 14px 보다 작게, 배치의 칸 크기(36)보다 크게 하지 않는다.
 - `KnowledgeChartView`: `ChartSpec` 을 그린다. 축 · 눈금 · 격자, 막대(여러 계열이면 나란히), 단계 막대, 선(빈 값에서 끊음), 점(계열마다 색), 범례, 제목 · 밑글. `NONE` 이면 가운데에 그 까닭을 쓴다.
+  - 히트맵: 색 범례(낮음 → 높음 띠. 색 눈금이 하나면 앞에 y 열 이름, 양 끝에 가장 작은 값 · 가장 큰 값, 여럿이면 낮음 · 높음과 "y 열마다 따로 칠한다") 아래 칸 격자. 범례는 위젯보다 넓어지지 않는다: 띠와 양 끝 값은 줄이지 않고, 띠가 가장 작은 너비(40px)까지 줄어든 뒤에도 넘치면 앞의 y 열 이름을 '…' 로 줄인다(이름은 범례 위 마우스 올림에 다 쓴다). 위에 열 이름, 왼쪽에 행 이름(넘치면 '…', 마우스 올림에 전부), 칸 사이 2px 바탕 틈, 행 높이는 위 한계(48px)까지. 칸 색은 그 y 열 색 눈금에서 값 자리의 색(범위가 0 이면 가운데), 칸 글은 들어갈 때만 채움과 대비가 큰 글자 색으로 쓴다. 빈 칸은 채우지 않고 격자 색 1px 테두리와 흐린 "—". 마우스 올림은 `행 이름 · 열 이름: 값 단위`(빈 칸은 `값 없음`), `FindPointAt` · `GetMarkRect` 는 칸, `GetPlotRect` 는 칸 격자, `GetLegendRect` 는 색 범례다. 모든 칸이 비면 "그릴 값이 없다" 를 쓴다.
 - 위젯은 Ocean 에 기대지 않는다. 그리기 결과는 `render()` 로 `QImage` 에 남길 수 있다.
 
 ## 8. 보기 앱
@@ -209,7 +211,7 @@ showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한�
 - `VisualMarkdownViewer [wiki 폴더] [--theme light|dark] [--size 가로x세로]`. 폴더를 주지 않으면 이 저장소의 `examples/showcase/wiki` 를 연다. `--size` 를 주지 않으면 창은 1600×1000 을 화면의 85% 안으로 줄인 크기다.
 - 왼쪽 나무: 지식 사이(관계망 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념), 지식 안(문서 → 표, 표 이름 뒤에 차트 종류). 문서를 고르면 문서 쪽(제목 · 표 목록)을 보이고, 표가 없는 문서는 그렇다고 알린다.
 - 오른쪽: 고른 보기. 관계 행렬은 가장 작은 칸에서도 창보다 크면 스크롤로 본다(`KnowledgeMatrixView::minimumSizeHint`).
-- 지식 안: 차트 아래에 원래 표(읽기 전용, 머리 줄은 열 이름과 단위, 칸은 원문 글 그대로)를 보인다. 차트 종류 상자(추천 · 막대 · 단계 막대 · 선 · 산점도)로 바꿀 수 있다(`KnowledgeChartBuilder::SetStrategy` · 추천이면 `ResetStrategy`, 표마다 기억한다). 차트로 그리지 않는 표는 제목 · 까닭 한 줄 · 표를 보이고 상자를 끈다.
+- 지식 안: 차트 아래에 원래 표(읽기 전용, 머리 줄은 열 이름과 단위, 칸은 원문 글 그대로)를 보인다. 차트 종류 상자(추천 · 막대 · 단계 막대 · 선 · 산점도 · 히트맵)로 바꿀 수 있다(`KnowledgeChartBuilder::SetStrategy` · 추천이면 `ResetStrategy`, 표마다 기억한다). 차트로 그리지 않는 표는 제목 · 까닭 한 줄 · 표를 보이고 상자를 끈다.
 - 도구: 폴더 열기(읽지 못하면 알리고 앞의 wiki 를 그대로 둔다), 밝음/어둠(창 팔레트도 따른다), 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수(마우스 올림으로 목록).
 - 점을 누르면(`ConceptActivated`) 상태 줄에 그 개념의 이름 · 종류 · 연도를 보인다. 문서 ↔ 개념에서 문서를 누르면(`DocumentActivated`) 나무에서 그 문서를 고른다.
 - 배치는 보기를 처음 열 때 계산하고 wiki 를 다시 읽을 때까지 둔다. 차트 설정은 표를 고를 때 만든다.
@@ -223,10 +225,10 @@ showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한�
 
 - `KnowledgeIndexTest`: showcase README §2.1 의 기대값을 진짜 색인으로 확인한다. `ShowcaseWikiTest` 안에 있던 색인 계산은 `KnowledgeIndex` 로 바꾼다(기대값은 그대로).
 - `KnowledgeGraphLayoutTest`: §5 의 showcase 기대값과 배치 조건(겹침 없음 · 방향 · 깊이 · 순서), 같은 입력이면 같은 배치.
-- `KnowledgeChartBuilderTest`: 표 12개가 README §3 과 같은 차트 · 계열 · 축 · 빈 값을 내는지, 숫자 읽기.
+- `KnowledgeChartBuilderTest`: 표 13개가 README §3 과 같은 차트 · 계열 · 축 · 빈 값을 내는지, 숫자 읽기, 히트맵의 추천 경계 · y 열마다의 색 눈금 · 겹친 칸.
 - `VisualMarkdownViewTests`(offscreen): 보기마다 그려지는지(비지 않음, 두 번 그리면 같음), 위치로 점 · 칸 찾기, 테마 바꾸기, 색 대비, 설명 글, 상호작용. `VISUALMARKDOWN_SNAPSHOT_DIR` 을 정하면 그린 그림을 PNG 로 남긴다.
-- `VisualMarkdownViewerTests`(offscreen): 인자 · 끝 코드, 화면 로직(보기 6개의 점 · 선 수, 표 12개의 차트 종류, 종류 바꾸기 · 되돌리기, 읽기 실패 때 앞 상태 지키기), 창(나무 → 쪽, `DocumentActivated` → 나무, 테마, 차트 종류 상자, 그리지 않는 표, 상태 줄), 스냅샷.
-- `VisualMarkdownViewerSnapshotTest`(ctest, `cmake -P`): 실행 파일로 showcase 스냅샷을 찍어 끝 코드 0 · PNG 18개 · 그림 크기를 보고, `snapshot.tsv` 가 `tests/viewer/showcase-snapshot.tsv` 와 바이트로 같은지 본다. 잘못된 인자 · 없는 wiki · 못 쓰는 파일의 끝 코드도 본다.
+- `VisualMarkdownViewerTests`(offscreen): 인자 · 끝 코드, 화면 로직(보기 6개의 점 · 선 수, 표 13개의 차트 종류, 종류 바꾸기 · 되돌리기, 읽기 실패 때 앞 상태 지키기), 창(나무 → 쪽, `DocumentActivated` → 나무, 테마, 차트 종류 상자, 그리지 않는 표, 상태 줄), 스냅샷.
+- `VisualMarkdownViewerSnapshotTest`(ctest, `cmake -P`): 실행 파일로 showcase 스냅샷을 찍어 끝 코드 0 · PNG 19개 · 그림 크기를 보고, `snapshot.tsv` 가 `tests/viewer/showcase-snapshot.tsv` 와 바이트로 같은지 본다. 잘못된 인자 · 없는 wiki · 못 쓰는 파일의 끝 코드도 본다.
 
 ## 10. 순서
 

@@ -53,8 +53,8 @@ public:
     // 그 표의 차트 설정을 만든다: 고른 종류면 SetStrategy, 아니면 ResetStrategy 로 추천 종류
     ChartSpec BuildChart(int document, int table);
 
-    static QString GetChartTypeKey(EChartType type);     // EChartType 이름: BAR · STEP_BAR · LINE · SCATTER · NONE
-    static QString GetChartTypeLabel(EChartType type);   // 막대 · 단계 막대 · 선 · 산점도 · 그리지 않음
+    static QString GetChartTypeKey(EChartType type);     // EChartType 이름: BAR · STEP_BAR · LINE · SCATTER · HEATMAP · NONE
+    static QString GetChartTypeLabel(EChartType type);   // 막대 · 단계 막대 · 선 · 산점도 · 히트맵 · 그리지 않음
 
     // 상태 줄 글
     QString DescribeConcept(const QString& conceptId) const;   // 이름 · 종류 · 연도(없으면 "연도 없음"). 모르는 id 는 그대로

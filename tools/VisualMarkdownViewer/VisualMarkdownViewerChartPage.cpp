@@ -31,7 +31,7 @@ const QString kRecommendedText = QStringLiteral("추천(%1)");
 const QString kNoneTitle = QStringLiteral("차트로 그리지 않는 표");
 const QString kWarningTitle = QStringLiteral("경고");
 const QString kJoin = QStringLiteral(" · ");
-constexpr EChartType kChoosableTypes[] = { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER };
+constexpr EChartType kChoosableTypes[] = { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP };
 constexpr int kRecommendedItem = 0;     // 상자 첫 항목: 추천(그 종류 이름)
 
 // 머리 칸: 열 이름과 단위
@@ -49,7 +49,7 @@ VisualMarkdownViewerChartPage::VisualMarkdownViewerChartPage(QWidget* parent)
     , m_pChartView(new KnowledgeChartView(this))
     , m_pTableWidget(new QTableWidget(this))
 {
-    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도
+    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵
     m_pChartTypeBox->addItem(kRecommendedText.arg(VisualMarkdownViewerModel::GetChartTypeLabel(EChartType::NONE)), kRecommendedChoice);
     for (const EChartType eType : kChoosableTypes)
         m_pChartTypeBox->addItem(VisualMarkdownViewerModel::GetChartTypeLabel(eType), static_cast<int>(eType));

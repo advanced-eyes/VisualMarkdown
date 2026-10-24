@@ -14,6 +14,7 @@
 #include <QWheelEvent>
 #include <QWidget>
 
+#include <algorithm>
 #include <cmath>
 
 // 위젯 시험이 함께 쓰는 것: 그리기 · 잉크 세기 · PNG 남기기 · 색 견주기 · 마우스 보내기 · 배치 · 실패 글
@@ -24,6 +25,18 @@ constexpr int kSnapshotHeight = 1000;
 constexpr double kMinInkRatio = 0.005;    // 바탕 색이 아닌 점이 전체의 0.5% 넘게 있어야 비지 않은 그림이다
 constexpr int kWheelNotch = 120;          // 휠 한 칸
 constexpr const char* kSnapshotVariable = "VISUALMARKDOWN_SNAPSHOT_DIR";   // 정하면 그 폴더에 PNG 를 남긴다
+
+// WCAG 2 상대 휘도(sRGB): 채널 값 → 선형 값 → 휘도. 대비는 (밝은 휘도 + 0.05) / (어두운 휘도 + 0.05)
+constexpr double kChannelMax = 255.0;
+constexpr double kLinearThreshold = 0.04045;
+constexpr double kLinearSlope = 12.92;
+constexpr double kGammaOffset = 0.055;
+constexpr double kGammaScale = 1.055;
+constexpr double kGamma = 2.4;
+constexpr double kRedWeight = 0.2126;
+constexpr double kGreenWeight = 0.7152;
+constexpr double kBlueWeight = 0.0722;
+constexpr double kContrastOffset = 0.05;
 
 // 위젯을 그 크기의 그림으로 그린다(화면에 띄우지 않는다)
 inline QImage Render(QWidget& widget)
@@ -72,6 +85,25 @@ inline double GetColorDistance(const QColor& a, const QColor& b)
     const double dGreen = a.green() - b.green();
     const double dBlue = a.blue() - b.blue();
     return std::sqrt(dRed * dRed + dGreen * dGreen + dBlue * dBlue);
+}
+
+// WCAG 2 휘도 · 대비. 테마 시험(글자 · 선 · 채움 위 글자)과 차트 시험(히트맵 칸 글)이 함께 쓴다
+inline double ToLinear(int channel)
+{
+    const double dValue = channel / kChannelMax;
+    return dValue <= kLinearThreshold ? dValue / kLinearSlope : std::pow((dValue + kGammaOffset) / kGammaScale, kGamma);
+}
+
+inline double GetLuminance(const QColor& color)
+{
+    return kRedWeight * ToLinear(color.red()) + kGreenWeight * ToLinear(color.green()) + kBlueWeight * ToLinear(color.blue());
+}
+
+inline double GetContrast(const QColor& a, const QColor& b)
+{
+    const double dLighter = std::max(GetLuminance(a), GetLuminance(b));
+    const double dDarker = std::min(GetLuminance(a), GetLuminance(b));
+    return (dLighter + kContrastOffset) / (dDarker + kContrastOffset);
 }
 
 // 그림의 rect 안에 그 색과 똑같은 점이 하나라도 있는지(범례 견본 찾기)

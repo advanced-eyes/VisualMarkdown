@@ -11,13 +11,13 @@
 namespace
 {
 // ================================================================================================
-// 기대값: design/Views.md §5(보기 6개의 점 · 선) · examples/showcase/README.md §2.1(문서 순서) · §3(표 12개의 시작 차트)
+// 기대값: design/Views.md §5(보기 6개의 점 · 선) · examples/showcase/README.md §2.1(문서 순서) · §3(표 13개의 시작 차트)
 // ================================================================================================
 constexpr int kNodeCount = 31;
 constexpr int kEdgeCount = 36;
 constexpr int kDocumentCount = 6;
 constexpr int kDroppedCount = 1;      // YOLOv3 사용 → Darknet-53(개념 파일이 없다)
-constexpr int kTableCount = 12;
+constexpr int kTableCount = 13;
 
 constexpr const char* kYoloTitle = "You Only Look Once: Unified, Real-Time Object Detection";
 constexpr const char* kYolo9000Title = "YOLO9000: Better, Faster, Stronger";
@@ -66,7 +66,7 @@ const QVector<DocumentLinks> kBipartiteLinks {
     { kYoloTitle, 5 }, { kYolo9000Title, 7 }, { kYolov3Title, 5 }, { kTwoStageTitle, 7 }, { kFocalLossTitle, 4 }, { kPaymentTitle, 9 },
 };
 
-// README §3 의 표 12개와 시작 차트(README 순)
+// README §3 의 표 13개와 시작 차트(README 순)
 struct ExpectedChart
 {
     const char* pDocument;
@@ -80,6 +80,7 @@ const QVector<ExpectedChart> kCharts {
     { kYolo9000Title, "검출기별 VOC 2007 정확도", EChartType::BAR },
     { kYolov3Title, "입력 크기별 COCO 정확도", EChartType::LINE },
     { kYolov3Title, "처리 시간과 AP50", EChartType::SCATTER },
+    { kYolov3Title, "검출기별 COCO 정확도", EChartType::HEATMAP },
     { kTwoStageTitle, "2단계 검출기의 VOC 2007 정확도", EChartType::BAR },
     { kTwoStageTitle, "학습 · 시험 시간", EChartType::BAR },
     { kPaymentTitle, "월별 응답 시간", EChartType::LINE },
@@ -199,7 +200,7 @@ private slots:
                      qUtf8Printable(DecodeUtf8(expected.pTitle) + QStringLiteral(": ") + QString::number(hashLinks.value(DecodeUtf8(expected.pTitle)))));
     }
 
-    // 표 12개의 시작 차트가 showcase README §3 과 같은 종류다. 차트 설정도 그 종류 · 그 표 제목으로 만든다
+    // 표 13개의 시작 차트가 showcase README §3 과 같은 종류다. 차트 설정도 그 종류 · 그 표 제목으로 만든다
     void tablesStartWithReadmeCharts()
     {
         VisualMarkdownViewerModel model;
@@ -239,6 +240,7 @@ private slots:
             { EChartType::STEP_BAR, { QStringLiteral("STEP_BAR"), QStringLiteral("단계 막대") } },
             { EChartType::LINE, { QStringLiteral("LINE"), QStringLiteral("선") } },
             { EChartType::SCATTER, { QStringLiteral("SCATTER"), QStringLiteral("산점도") } },
+            { EChartType::HEATMAP, { QStringLiteral("HEATMAP"), QStringLiteral("히트맵") } },
             { EChartType::NONE, { QStringLiteral("NONE"), QStringLiteral("그리지 않음") } },
         };
         for (const auto& pairName : vecNames)
@@ -268,6 +270,8 @@ private slots:
 
         model.ChooseChart(kPaymentDocument, kMonthlyTable, EChartType::STEP_BAR);
         QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::STEP_BAR);
+        model.ChooseChart(kPaymentDocument, kMonthlyTable, EChartType::HEATMAP);
+        QCOMPARE(model.BuildChart(kPaymentDocument, kMonthlyTable).eType, EChartType::HEATMAP);
         model.ChooseChart(kPaymentDocument, kMonthlyTable, std::nullopt);
         QVERIFY(!model.GetChosenChart(kPaymentDocument, kMonthlyTable).has_value());
         QCOMPARE(model.GetChartType(kPaymentDocument, kMonthlyTable), EChartType::LINE);

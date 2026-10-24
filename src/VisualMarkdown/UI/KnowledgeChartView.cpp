@@ -89,6 +89,28 @@ constexpr double kMessageRadius = 10;
 constexpr double kMessageLineGap = 4;
 constexpr double kPi = 3.14159265358979323846;
 
+// 히트맵(design/MoreViews.md §4.3)
+constexpr double kHeatCellGap = 2;             // 칸 사이 바탕 색 틈
+constexpr double kHeatGapMinRatio = 3;         // 칸이 틈의 이 배보다 넓을(높을) 때만 틈을 둔다
+constexpr double kHeatMaxRowPitch = 48;        // 행 높이(틈 포함)의 위 한계. 아래 한계는 그림 칸이다(행이 많으면 칸이 작아지고 글을 쓰지 않는다)
+constexpr double kHeatMaxRowLabelRatio = 0.3;  // 행 이름 칸은 위젯 너비의 이만큼까지(넘치는 이름은 줄인다)
+constexpr double kHeatLabelGap = 8;            // 행 이름과 격자 사이
+constexpr double kHeatHeaderGap = 6;           // 열 이름과 격자 사이
+constexpr double kHeatCellPadding = 4;         // 칸 글 좌우 여백
+constexpr double kHeatLegendBarWidth = 200;    // 색 범례 띠
+constexpr double kHeatMinLegendBarWidth = 40;  // 띠는 범례 앞 y 열 이름 · 뒤 글에 자리를 내주며 이만큼까지 줄어든다(띠가 보이게)
+constexpr double kHeatMinLegendTitleWidth = 32;   // 범례 앞 y 열 이름 칸이 이보다 좁으면 이름을 뺀다(줄여도 읽을 글이 남지 않는다)
+constexpr double kHeatLegendBarHeight = 12;
+constexpr double kHeatLegendTextGap = 8;       // 띠 · 양 끝 글 · 이름 사이
+constexpr double kHeatLegendNoteGap = 18;      // 높음과 "y 열마다 따로 칠한다" 사이
+constexpr double kHeatRampMiddle = 0.5;        // 범위가 0 인 색 눈금의 칸 색 자리
+
+const QString kHeatLowLabel = QStringLiteral("낮음");
+const QString kHeatHighLabel = QStringLiteral("높음");
+const QString kHeatPerColumnNote = QStringLiteral("y 열마다 따로 칠한다");
+const QString kHeatEmptyCell = QStringLiteral("—");
+const QString kHeatJoin = QStringLiteral(" · ");
+
 const QString kNoneTitle = QStringLiteral("차트로 그리지 않는 표");
 const QString kNoValueTitle = QStringLiteral("그릴 값이 없다");
 const QString kMissingLabel = QStringLiteral("값 없음");
@@ -295,6 +317,16 @@ bool FitsInLines(const QString& text, const QFontMetricsF& metrics, double width
         vecLines << strLine;
     return vecLines.size() <= maxLines;
 }
+
+// 오름차순 경계(n + 1 개)에서 value 가 드는 칸 자리: edges[i] <= value 인 가장 큰 i(0 … n - 1)
+int FindEdgeIndex(const QVector<double>& edges, double value)
+{
+    int iIndex = 0;
+    for (int iEdge = 1; iEdge + 1 < edges.size(); ++iEdge)
+        if (edges[iEdge] <= value)
+            iIndex = iEdge;
+    return iIndex;
+}
 }
 
 KnowledgeChartView::KnowledgeChartView(QWidget* parent)
@@ -324,6 +356,15 @@ QPair<int, int> KnowledgeChartView::FindPointAt(const QPoint& pos) const
     const ChartGeometry geometry = ComputeGeometry();
     if (geometry.plot.isEmpty())
         return qMakePair(-1, -1);
+    if (m_spec.eType == EChartType::HEATMAP)
+    {
+        // 히트맵: 그 자리 칸의 점(첫 점). 점이 없는 칸은 찾지 않는다
+        const QPair<int, int> pairCell = FindHeatmapCellAt(geometry, QPointF(pos));
+        if (pairCell.first < 0)
+            return qMakePair(-1, -1);
+        const int iPoint = ComputeHeatmapCells()[pairCell.second].value(pairCell.first, -1);
+        return iPoint >= 0 ? qMakePair(pairCell.second, iPoint) : qMakePair(-1, -1);
+    }
     const QVector<QVector<QRectF>> vecMarks = ComputeMarks(geometry);
     const QPointF ptPos(pos);
     QPair<int, int> pairBest(-1, -1);
@@ -362,6 +403,11 @@ QPair<int, int> KnowledgeChartView::FindPointAt(const QPoint& pos) const
 
 QString KnowledgeChartView::GetToolTipAt(const QPoint& pos) const
 {
+    if (m_spec.eType == EChartType::HEATMAP)
+    {
+        const ChartGeometry geometry = ComputeGeometry();
+        return geometry.plot.isEmpty() ? QString() : MakeHeatmapToolTip(geometry, QPointF(pos));
+    }
     const QPair<int, int> pairPoint = FindPointAt(pos);
     if (pairPoint.first < 0)
         return QString();
@@ -375,6 +421,14 @@ QRectF KnowledgeChartView::GetMarkRect(int series, int point) const
     const ChartGeometry geometry = ComputeGeometry();
     if (geometry.plot.isEmpty())
         return QRectF();
+    if (m_spec.eType == EChartType::HEATMAP)
+    {
+        // 히트맵: 그 점의 칸(그 칸의 첫 점일 때만)
+        const int iRow = GetHeatmapRow(m_spec.vecSeries[series].vecPoints[point], ListCategoryLabels().size());
+        if (iRow < 0 || ComputeHeatmapCells()[series].value(iRow, -1) != point)
+            return QRectF();
+        return GetHeatmapCellRect(geometry, iRow, series);
+    }
     return ComputeMarks(geometry)[series][point];
 }
 
@@ -390,7 +444,7 @@ QRectF KnowledgeChartView::GetLegendRect() const
 
 QString KnowledgeChartView::GetMessageText() const
 {
-    if (m_spec.eType != EChartType::NONE && !m_spec.vecSeries.isEmpty())
+    if (!ShowsMessage())
         return QString();
     QStringList vecLines { m_spec.eType == EChartType::NONE ? kNoneTitle : kNoValueTitle };
     vecLines << m_spec.vecWarnings;
@@ -441,6 +495,12 @@ void KnowledgeChartView::paintEvent(QPaintEvent* event)
         DrawMessage(painter, geometry);
         return;
     }
+    if (m_spec.eType == EChartType::HEATMAP)
+    {
+        DrawHeatmapLegend(painter, geometry);
+        DrawHeatmap(painter, geometry);
+        return;
+    }
     const QVector<QVector<QRectF>> vecMarks = ComputeMarks(geometry);
     DrawGrid(painter, geometry);
     DrawXAxis(painter, geometry);
@@ -476,9 +536,14 @@ KnowledgeChartView::ChartGeometry KnowledgeChartView::ComputeGeometry() const
     dY += kSectionGap;
 
     const double dBottomLimit = height() - kMargin;
-    if (m_spec.eType == EChartType::NONE || m_spec.vecSeries.isEmpty())
+    if (ShowsMessage())
     {
         geometry.message = QRectF(dLeft, dY, dRight - dLeft, std::max(1.0, dBottomLimit - dY));
+        return geometry;
+    }
+    if (m_spec.eType == EChartType::HEATMAP)
+    {
+        ComputeHeatmapGeometry(&geometry, dLeft, dRight, dY, dBottomLimit);
         return geometry;
     }
 
@@ -1132,5 +1197,344 @@ void KnowledgeChartView::DrawMessage(QPainter& painter, const ChartGeometry& geo
         const QRectF rectLine(rectText.left(), dY, rectText.width(), metrics.height());
         painter.drawText(rectLine, Qt::AlignHCenter | Qt::AlignVCenter, metrics.elidedText(vecLines[iLine], Qt::ElideRight, rectLine.width()));
         dY += metrics.height() + (bTitle ? kSectionGap : kMessageLineGap);
+    }
+}
+
+bool KnowledgeChartView::ShowsMessage() const
+{
+    if (m_spec.eType == EChartType::NONE || m_spec.vecSeries.isEmpty())
+        return true;
+    if (m_spec.eType != EChartType::HEATMAP)
+        return false;
+    // 히트맵: 값이 있는 칸이 하나도 없으면 "그릴 값이 없다"
+    const QVector<QVector<int>> vecCells = ComputeHeatmapCells();
+    for (int iSeries = 0; iSeries < vecCells.size(); ++iSeries)
+    {
+        for (const int iPoint : vecCells[iSeries])
+        {
+            if (iPoint < 0)
+                continue;
+            const std::optional<double>& optY = m_spec.vecSeries[iSeries].vecPoints[iPoint].optY;
+            if (optY && std::isfinite(*optY))
+                return false;
+        }
+    }
+    return true;
+}
+
+void KnowledgeChartView::ComputeHeatmapGeometry(ChartGeometry* geometry, double left, double right, double top, double bottom) const
+{
+    HeatmapGeometry& heatmap = geometry->heatmap;
+    const QFontMetricsF metrics(MakeFont(m_theme.iLabelFontPx));
+    const double dLineHeight = metrics.height();
+    const double dWidth = right - left;
+
+    // 색 범례(한 줄): 색 눈금이 하나면 [y 열 이름] 가장 작은 값 [띠] 가장 큰 값(단위 붙임), 여럿이면 낮음 [띠] 높음 · y 열마다 따로 칠한다
+    if (m_spec.vecYAxes.size() == 1)
+    {
+        const ChartAxis& axis = m_spec.vecYAxes.first();
+        heatmap.strLegendTitle = axis.strTitle;
+        heatmap.strLegendLow = AppendUnit(FormatValue(axis.dMin), axis.strUnit);
+        heatmap.strLegendHigh = AppendUnit(FormatValue(axis.dMax), axis.strUnit);
+    }
+    else
+    {
+        heatmap.strLegendLow = kHeatLowLabel;
+        heatmap.strLegendHigh = kHeatHighLabel;
+        heatmap.strLegendNote = kHeatPerColumnNote;
+    }
+    // 위젯 너비를 넘지 않게: 띠를 가장 작은 너비까지 줄여도 넘치면 앞의 y 열 이름을 '…' 로 줄이고(남는 칸이 너무 좁으면 뺀다. 이름 전부는 마우스 올림 설명에),
+    // 양 끝 값만으로도 넘치는 아주 좁은 위젯에서는 띠를 더 줄인다. 양 끝 값은 줄이지 않는다
+    const double dLowWidth = metrics.horizontalAdvance(heatmap.strLegendLow);
+    const double dHighWidth = metrics.horizontalAdvance(heatmap.strLegendHigh);
+    const double dValuesWidth = dLowWidth + 2 * kHeatLegendTextGap + dHighWidth;
+    bool bLegendTitle = !heatmap.strLegendTitle.isEmpty();
+    double dTitleTextWidth = bLegendTitle ? metrics.horizontalAdvance(heatmap.strLegendTitle) : 0;
+    const double dTitleRoom = dWidth - dValuesWidth - kHeatMinLegendBarWidth - kHeatLegendTextGap;
+    if (bLegendTitle && dTitleTextWidth > dTitleRoom)
+    {
+        bLegendTitle = dTitleRoom >= kHeatMinLegendTitleWidth;
+        dTitleTextWidth = bLegendTitle ? std::floor(dTitleRoom) : 0;
+    }
+    const double dTitleWidth = bLegendTitle ? dTitleTextWidth + kHeatLegendTextGap : 0;
+    const double dNoteWidth = heatmap.strLegendNote.isEmpty() ? 0 : kHeatLegendNoteGap + metrics.horizontalAdvance(heatmap.strLegendNote);
+    const double dTextsWidth = dTitleWidth + dValuesWidth + dNoteWidth;
+    double dBarWidth = std::round(ViewCommon::Clamp(dWidth - dTextsWidth, kHeatMinLegendBarWidth, kHeatLegendBarWidth));
+    if (dValuesWidth + dBarWidth > dWidth)
+        dBarWidth = std::max(0.0, std::floor(dWidth - dValuesWidth));
+    double dX = left;
+    if (bLegendTitle)
+    {
+        heatmap.legendTitle = QRectF(dX, top, dTitleTextWidth, dLineHeight);
+        dX += dTitleWidth;
+    }
+    heatmap.legendLow = QRectF(dX, top, dLowWidth, dLineHeight);
+    dX = heatmap.legendLow.right() + kHeatLegendTextGap;
+    heatmap.legendBar = QRectF(std::round(dX), std::round(top + (dLineHeight - kHeatLegendBarHeight) / 2), dBarWidth, kHeatLegendBarHeight);
+    dX = heatmap.legendBar.right() + kHeatLegendTextGap;
+    heatmap.legendHigh = QRectF(dX, top, dHighWidth, dLineHeight);
+    dX = heatmap.legendHigh.right();
+    if (!heatmap.strLegendNote.isEmpty())
+    {
+        const double dNoteLeft = dX + kHeatLegendNoteGap;
+        const double dNoteRoom = std::max(0.0, std::min(dNoteWidth - kHeatLegendNoteGap, right - dNoteLeft));
+        if (dNoteRoom > 0)
+            heatmap.legendNote = QRectF(dNoteLeft, top, dNoteRoom, dLineHeight);
+    }
+    for (const QRectF& rectPart : { heatmap.legendTitle, heatmap.legendLow, heatmap.legendBar, heatmap.legendHigh, heatmap.legendNote })
+        if (!rectPart.isEmpty())
+            geometry->legend = geometry->legend.united(rectPart);
+    double dY = geometry->legend.bottom() + kSectionGap;
+
+    // 행 이름 칸: 가장 긴 이름(그 위 구석의 x 축 이름도)의 너비. 위젯 너비의 30% 까지이고 넘치는 이름은 줄인다
+    const QStringList vecRowLabels = ListCategoryLabels();
+    const int iRows = std::max(1, static_cast<int>(vecRowLabels.size()));
+    const int iColumns = std::max(1, static_cast<int>(m_spec.vecSeries.size()));
+    double dRowLabelWidth = metrics.horizontalAdvance(MakeAxisTitle(m_spec.xAxis.strTitle, m_spec.xAxis.strUnit));
+    for (const QString& strLabel : vecRowLabels)
+        dRowLabelWidth = std::max(dRowLabelWidth, metrics.horizontalAdvance(strLabel));
+    dRowLabelWidth = std::min(dRowLabelWidth, std::max(0.0, dWidth * kHeatMaxRowLabelRatio));
+    const double dGridLeft = left + dRowLabelWidth + kHeatLabelGap;
+    const double dGridWidth = std::max(kMinPlotSize, right - dGridLeft);
+    heatmap.dGapX = dGridWidth / iColumns > kHeatGapMinRatio * kHeatCellGap ? kHeatCellGap : 0;
+    const double dColumnPitch = (dGridWidth + heatmap.dGapX) / iColumns;
+
+    // 열 이름: 모두 한 줄에 들어가면 한 줄, 아니면 두 줄로 접는다(그래도 넘치면 줄인다)
+    heatmap.iHeaderLines = 1;
+    for (const ChartSeries& series : m_spec.vecSeries)
+        if (metrics.horizontalAdvance(series.strName) > dColumnPitch - heatmap.dGapX)
+            heatmap.iHeaderLines = kWrappedLines;
+    const double dHeaderHeight = heatmap.iHeaderLines * dLineHeight;
+    heatmap.columnLabels = QRectF(dGridLeft, dY, dGridWidth, dHeaderHeight);
+    heatmap.corner = QRectF(left, dY, dRowLabelWidth, dHeaderHeight);
+    dY += dHeaderHeight + kHeatHeaderGap;
+
+    // 행: 그림 칸 높이를 나누되 행 높이는 위 한계까지. 경계는 정수 화소에 맞춰 칸 가장자리가 흐리지 않게 한다
+    const double dAvailable = std::max(kMinPlotSize, bottom - dY);
+    heatmap.dGapY = dAvailable / iRows > kHeatGapMinRatio * kHeatCellGap ? kHeatCellGap : 0;
+    const double dRowPitch = std::min((dAvailable + heatmap.dGapY) / iRows, kHeatMaxRowPitch);
+    for (int iColumn = 0; iColumn <= iColumns; ++iColumn)
+        heatmap.vecColumnEdges << std::round(dGridLeft + iColumn * dColumnPitch);
+    for (int iRow = 0; iRow <= iRows; ++iRow)
+        heatmap.vecRowEdges << std::round(dY + iRow * dRowPitch);
+    const double dPlotLeft = heatmap.vecColumnEdges.first();
+    const double dPlotTop = heatmap.vecRowEdges.first();
+    geometry->plot = QRectF(dPlotLeft, dPlotTop, std::max(1.0, heatmap.vecColumnEdges.last() - heatmap.dGapX - dPlotLeft),
+                            std::max(1.0, heatmap.vecRowEdges.last() - heatmap.dGapY - dPlotTop));
+    heatmap.rowLabels = QRectF(left, dPlotTop, dRowLabelWidth, geometry->plot.height());
+}
+
+QVector<QVector<int>> KnowledgeChartView::ComputeHeatmapCells() const
+{
+    const int iRows = ListCategoryLabels().size();
+    QVector<QVector<int>> vecCells;
+    for (const ChartSeries& series : m_spec.vecSeries)
+    {
+        QVector<int> vecColumn(iRows, -1);
+        for (int iPoint = 0; iPoint < series.vecPoints.size(); ++iPoint)
+        {
+            const int iRow = GetHeatmapRow(series.vecPoints[iPoint], iRows);
+            if (iRow >= 0 && vecColumn[iRow] < 0)
+                vecColumn[iRow] = iPoint;
+        }
+        vecCells << vecColumn;
+    }
+    return vecCells;
+}
+
+int KnowledgeChartView::GetHeatmapRow(const ChartPoint& point, int rows) const
+{
+    if (!std::isfinite(point.dX) || point.dX < 0 || point.dX >= rows || point.dX != std::floor(point.dX))
+        return -1;
+    return static_cast<int>(point.dX);
+}
+
+QRectF KnowledgeChartView::GetHeatmapCellRect(const ChartGeometry& geometry, int row, int column) const
+{
+    const HeatmapGeometry& heatmap = geometry.heatmap;
+    if (row < 0 || column < 0 || row + 1 >= heatmap.vecRowEdges.size() || column + 1 >= heatmap.vecColumnEdges.size())
+        return QRectF();
+    const double dLeft = heatmap.vecColumnEdges[column];
+    const double dTop = heatmap.vecRowEdges[row];
+    return QRectF(dLeft, dTop, std::max(0.0, heatmap.vecColumnEdges[column + 1] - heatmap.dGapX - dLeft),
+                  std::max(0.0, heatmap.vecRowEdges[row + 1] - heatmap.dGapY - dTop));
+}
+
+QPair<int, int> KnowledgeChartView::FindHeatmapCellAt(const ChartGeometry& geometry, const QPointF& pos) const
+{
+    // 칸 오른쪽 · 아래의 틈은 그 칸으로 본다(틈에서 설명이 깜빡이지 않게)
+    const QRectF& rectPlot = geometry.plot;
+    const HeatmapGeometry& heatmap = geometry.heatmap;
+    if (rectPlot.isEmpty() || heatmap.vecRowEdges.size() < 2 || heatmap.vecColumnEdges.size() < 2 || pos.x() < rectPlot.left() || pos.x() >= rectPlot.right()
+        || pos.y() < rectPlot.top() || pos.y() >= rectPlot.bottom())
+        return qMakePair(-1, -1);
+    const int iColumn = FindEdgeIndex(heatmap.vecColumnEdges, pos.x());
+    const int iRow = FindEdgeIndex(heatmap.vecRowEdges, pos.y());
+    if (iColumn >= m_spec.vecSeries.size() || iRow >= ListCategoryLabels().size())
+        return qMakePair(-1, -1);
+    return qMakePair(iRow, iColumn);
+}
+
+QColor KnowledgeChartView::GetHeatmapColor(int series, double value) const
+{
+    // t = (값 − 가장 작은 값) / (가장 큰 값 − 가장 작은 값). 범위가 0 이거나 축이 없으면 가운데
+    double dT = kHeatRampMiddle;
+    const int iAxis = m_spec.vecSeries[series].iAxis;
+    if (iAxis >= 0 && iAxis < m_spec.vecYAxes.size())
+        dT = Normalize(value, m_spec.vecYAxes[iAxis].dMin, m_spec.vecYAxes[iAxis].dMax);
+    if (!std::isfinite(dT))
+        dT = kHeatRampMiddle;
+    return m_theme.GetRampColor(dT);
+}
+
+QString KnowledgeChartView::MakeHeatmapToolTip(const ChartGeometry& geometry, const QPointF& pos) const
+{
+    const QStringList vecRowLabels = ListCategoryLabels();
+    const HeatmapGeometry& heatmap = geometry.heatmap;
+    const QRectF& rectPlot = geometry.plot;
+
+    // 칸: "행 이름 · 열 이름: 값 단위", 값이 없거나 점이 없는 칸은 "값 없음"
+    const QPair<int, int> pairCell = FindHeatmapCellAt(geometry, pos);
+    if (pairCell.first >= 0)
+    {
+        const int iRow = pairCell.first;
+        const ChartSeries& series = m_spec.vecSeries[pairCell.second];
+        const int iPoint = ComputeHeatmapCells()[pairCell.second].value(iRow, -1);
+        QString strValue = kMissingLabel;
+        if (iPoint >= 0 && series.vecPoints[iPoint].optY && std::isfinite(*series.vecPoints[iPoint].optY))
+            strValue = AppendUnit(FormatValue(*series.vecPoints[iPoint].optY), series.strUnit);
+        return vecRowLabels.value(iRow) + kHeatJoin + series.strName + QStringLiteral(": ") + strValue;
+    }
+    // 행 이름 칸(격자 왼쪽) · 열 이름 칸(격자 위): 줄이지 않은 이름 전부
+    if (pos.x() >= heatmap.rowLabels.left() && pos.x() < rectPlot.left() && pos.y() >= rectPlot.top() && pos.y() < rectPlot.bottom())
+        return vecRowLabels.value(FindEdgeIndex(heatmap.vecRowEdges, pos.y()));
+    if (pos.y() >= heatmap.columnLabels.top() && pos.y() < rectPlot.top() && pos.x() >= rectPlot.left() && pos.x() < rectPlot.right())
+    {
+        const int iColumn = FindEdgeIndex(heatmap.vecColumnEdges, pos.x());
+        return iColumn < m_spec.vecSeries.size() ? m_spec.vecSeries[iColumn].strName : QString();
+    }
+    // 색 범례: 색 눈금마다 이름과 범위
+    if (geometry.legend.contains(pos))
+    {
+        QStringList vecLines;
+        for (const ChartAxis& axis : m_spec.vecYAxes)
+            vecLines << axis.strTitle + QStringLiteral(": ") + AppendUnit(FormatValue(axis.dMin), axis.strUnit) + QStringLiteral(" – ")
+                            + AppendUnit(FormatValue(axis.dMax), axis.strUnit);
+        return vecLines.join(QLatin1Char('\n'));
+    }
+    return QString();
+}
+
+void KnowledgeChartView::DrawHeatmapLegend(QPainter& painter, const ChartGeometry& geometry) const
+{
+    const HeatmapGeometry& heatmap = geometry.heatmap;
+    const QFont fontLabel = MakeFont(m_theme.iLabelFontPx);
+    const QFontMetricsF metrics(fontLabel);
+    painter.setFont(fontLabel);
+    if (!heatmap.legendTitle.isEmpty())
+    {
+        // 범례 앞 y 열 이름: 자리가 모자라면 '…' 로 줄인다(들어가면 그대로)
+        painter.setPen(m_theme.mutedText);
+        painter.drawText(heatmap.legendTitle, Qt::AlignLeft | Qt::AlignVCenter,
+                         metrics.elidedText(heatmap.strLegendTitle, Qt::ElideRight, heatmap.legendTitle.width()));
+    }
+    painter.setPen(m_theme.text);
+    painter.drawText(heatmap.legendLow, Qt::AlignLeft | Qt::AlignVCenter, heatmap.strLegendLow);
+    painter.drawText(heatmap.legendHigh, Qt::AlignLeft | Qt::AlignVCenter, heatmap.strLegendHigh);
+
+    // 띠: 화소 열마다 그 자리의 색(칸과 같은 보간). 왼쪽 끝이 낮음, 오른쪽 끝이 높음
+    const QRect rectBar = heatmap.legendBar.toRect();
+    const int iBarWidth = rectBar.width();
+    for (int iX = 0; iX < iBarWidth; ++iX)
+    {
+        const double dT = iBarWidth > 1 ? static_cast<double>(iX) / (iBarWidth - 1) : kHeatRampMiddle;
+        painter.fillRect(QRect(rectBar.left() + iX, rectBar.top(), 1, rectBar.height()), m_theme.GetRampColor(dT));
+    }
+    if (!heatmap.legendNote.isEmpty())
+    {
+        painter.setPen(m_theme.mutedText);
+        painter.drawText(heatmap.legendNote, Qt::AlignLeft | Qt::AlignVCenter,
+                         metrics.elidedText(heatmap.strLegendNote, Qt::ElideRight, heatmap.legendNote.width()));
+    }
+}
+
+void KnowledgeChartView::DrawHeatmap(QPainter& painter, const ChartGeometry& geometry) const
+{
+    const HeatmapGeometry& heatmap = geometry.heatmap;
+    const QStringList vecRowLabels = ListCategoryLabels();
+    const QVector<QVector<int>> vecCells = ComputeHeatmapCells();
+    const QFont fontLabel = MakeFont(m_theme.iLabelFontPx);
+    const QFontMetricsF metrics(fontLabel);
+    const double dLineHeight = metrics.height();
+    painter.setFont(fontLabel);
+
+    // 구석: x 축 이름(행 이름 칸 위, 격자 쪽으로 맞춘다)
+    const QString strCorner = MakeAxisTitle(m_spec.xAxis.strTitle, m_spec.xAxis.strUnit);
+    if (!strCorner.isEmpty() && heatmap.corner.width() > 0)
+    {
+        painter.setPen(m_theme.mutedText);
+        painter.drawText(heatmap.corner, Qt::AlignRight | Qt::AlignBottom, metrics.elidedText(strCorner, Qt::ElideRight, heatmap.corner.width()));
+    }
+
+    // 열 이름: 그 열 위 가운데(한 줄 또는 두 줄), 마지막 줄이 격자 쪽에 붙는다. 넘치면 줄인다
+    painter.setPen(m_theme.text);
+    for (int iColumn = 0; iColumn < m_spec.vecSeries.size() && iColumn + 1 < heatmap.vecColumnEdges.size(); ++iColumn)
+    {
+        const double dLeft = heatmap.vecColumnEdges[iColumn];
+        const double dWidth = heatmap.vecColumnEdges[iColumn + 1] - heatmap.dGapX - dLeft;
+        if (dWidth <= 0)
+            continue;
+        const QString& strName = m_spec.vecSeries[iColumn].strName;
+        const QStringList vecLines = heatmap.iHeaderLines > 1 ? WrapLabel(strName, metrics, dWidth, heatmap.iHeaderLines)
+                                                              : QStringList { metrics.elidedText(strName, Qt::ElideRight, dWidth) };
+        const double dTop = heatmap.columnLabels.bottom() - vecLines.size() * dLineHeight;
+        for (int iLine = 0; iLine < vecLines.size(); ++iLine)
+            painter.drawText(QRectF(dLeft, dTop + iLine * dLineHeight, dWidth, dLineHeight), Qt::AlignHCenter | Qt::AlignVCenter, vecLines[iLine]);
+    }
+
+    // 행 이름: 그 행 왼쪽에 오른쪽 맞춤, 넘치면 줄인다. 행이 글 줄보다 낮으면 겹치지 않게 몇 행 건너 하나씩 쓴다
+    const int iRowCount = std::min(static_cast<int>(vecRowLabels.size()), static_cast<int>(heatmap.vecRowEdges.size()) - 1);
+    const double dRowPitch = iRowCount > 0 ? (heatmap.vecRowEdges.last() - heatmap.vecRowEdges.first()) / iRowCount : dLineHeight;
+    const int iRowStride = dRowPitch > 0 ? std::max(1, static_cast<int>(std::ceil(dLineHeight / dRowPitch - kTickTolerance))) : 1;
+    for (int iRow = 0; iRow < iRowCount && heatmap.rowLabels.width() > 0; iRow += iRowStride)
+    {
+        const double dCenter = (heatmap.vecRowEdges[iRow] + heatmap.vecRowEdges[iRow + 1] - heatmap.dGapY) / 2;
+        painter.drawText(QRectF(heatmap.rowLabels.left(), dCenter - dLineHeight / 2, heatmap.rowLabels.width(), dLineHeight), Qt::AlignRight | Qt::AlignVCenter,
+                         metrics.elidedText(vecRowLabels[iRow], Qt::ElideRight, heatmap.rowLabels.width()));
+    }
+
+    // 칸: 값이 있으면 색 눈금 자리 색으로 채우고 값 글(들어갈 때만, 채움과 대비가 큰 글자 색). 빈 칸은 격자 색 1px 테두리와 흐린 "—"
+    for (int iColumn = 0; iColumn < vecCells.size(); ++iColumn)
+    {
+        const ChartSeries& series = m_spec.vecSeries[iColumn];
+        for (int iRow = 0; iRow < vecCells[iColumn].size(); ++iRow)
+        {
+            const QRectF rectCell = GetHeatmapCellRect(geometry, iRow, iColumn);
+            if (rectCell.isEmpty())
+                continue;
+            const int iPoint = vecCells[iColumn][iRow];
+            const std::optional<double> optY = iPoint >= 0 ? series.vecPoints[iPoint].optY : std::nullopt;
+            const bool bTextFits = dLineHeight <= rectCell.height();
+            if (optY && std::isfinite(*optY))
+            {
+                const QColor fill = GetHeatmapColor(iColumn, *optY);
+                painter.fillRect(rectCell, fill);
+                const QString strValue = FormatValue(*optY);
+                if (bTextFits && metrics.horizontalAdvance(strValue) + 2 * kHeatCellPadding <= rectCell.width())
+                {
+                    painter.setPen(m_theme.GetFillTextColor(fill));
+                    painter.drawText(rectCell, Qt::AlignCenter, strValue);
+                }
+                continue;
+            }
+            painter.setPen(QPen(m_theme.grid, 1));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(rectCell.adjusted(0.5, 0.5, -0.5, -0.5));
+            if (bTextFits && metrics.horizontalAdvance(kHeatEmptyCell) + 2 * kHeatCellPadding <= rectCell.width())
+            {
+                painter.setPen(m_theme.mutedText);
+                painter.drawText(rectCell, Qt::AlignCenter, kHeatEmptyCell);
+            }
+        }
     }
 }

@@ -36,6 +36,9 @@ struct ChartScale
     QVector<double> vecTicks;
 };
 
+// y 축을 나누는 법. 막대 · 단계 막대 · 선 · 산점도는 단위마다(규칙 4), 히트맵은 y 열마다(색 눈금, design/MoreViews.md §4.1)
+enum class EYAxisGrouping { BY_UNIT, BY_COLUMN };
+
 // IsQuantityText 가 숫자로 보는 칸만 읽는다(천 단위 쉼표 · 부호 · 소수 · 지수). 그 밖 · 빈 칸 · 유한하지 않은 값은 비었다
 std::optional<double> ParseQuantity(const QString& cell);
 // 이름이 같은 첫 열의 자리. 없으면 -1
@@ -52,8 +55,16 @@ bool BeginChart(const KnowledgeTable& table, EChartType type, ChartSpec* spec, C
 QVector<ChartRow> PlaceOnCategories(const KnowledgeTable& table, const ChartColumns& columns, ChartSpec* spec);
 // 수치 x 축: dX 는 x 값이다. x 가 비었거나 숫자가 아닌 행은 경고를 남기고 뺀다. x 축 범위 · 눈금은 값 범위에 여유를 둔다
 QVector<ChartRow> PlaceOnNumbers(const KnowledgeTable& table, const ChartColumns& columns, ChartSpec* spec);
-// y 마다(series 열이 있으면 그 값마다) 계열을 만들고, y 단위마다 축을 둔다(첫 단위 왼쪽 · 둘째 오른쪽 · 셋째부터 오른쪽과 경고)
-void BuildSeries(const KnowledgeTable& table, const ChartColumns& columns, const QVector<ChartRow>& rows, ChartSpec* spec);
+// series 값: 빈 칸이 아닌 글, 처음 나온 순서. series 열이 없으면 빈 글 하나(계열은 y 마다 하나)
+QStringList ListSeriesGroups(const KnowledgeTable& table, const ChartColumns& columns);
+// 계열 수: 수치인 y 열 수 × series 값 수(series 열이 없으면 1)
+int CountSeries(const KnowledgeTable& table, const ChartColumns& columns);
+// 계열 이름: series 열이 없으면 y 열 이름, 있으면 그 값(y 가 여럿이면 "<y> · <값>")
+QString MakeSeriesName(const KnowledgeTable& table, const ChartColumns& columns, int yColumn, const QString& group);
+// y 마다(series 열이 있으면 그 값마다) 계열을 만들고 축을 둔다.
+// BY_UNIT: y 단위마다 축(첫 단위 왼쪽 · 둘째 오른쪽 · 셋째부터 오른쪽과 경고). BY_COLUMN: y 열마다 축 하나(y 순서, 이름 · 단위는 그 열), 계열의 축은 그 y 열 자리
+void BuildSeries(const KnowledgeTable& table, const ChartColumns& columns, const QVector<ChartRow>& rows, ChartSpec* spec,
+                 EYAxisGrouping grouping = EYAxisGrouping::BY_UNIT);
 // y 축마다 그 축 계열의 값으로 범위 · 눈금을 정한다
 void ScaleYAxes(ChartSpec* spec, bool includeZero);
 

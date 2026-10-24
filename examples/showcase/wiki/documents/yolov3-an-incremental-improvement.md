@@ -9,7 +9,7 @@ learned: 2026-10-22T11:05:00+09:00
 analysis: 2c3d4e5f-6a7b-4c8d-9e0f-0a1b2c3d4e53
 rules: 1
 edited: false
-digest: cbdbca25cf98a7b7905ccfa52d9dff468c4f9d899a053bc0d95fd55b1347677c
+digest: 1a1ae3eab8424a458e95087e22532283f1406bce15c2107eadce702642cdb8a3
 ---
 
 # YOLOv3: An Incremental Improvement
@@ -83,3 +83,20 @@ YOLO 에 작은 설계 변화를 여럿 더해, 조금 커졌지만 더 정확�
 | 320 | 22 | 51.5 |
 | 416 | 29 | 55.3 |
 | 608 | 51 | 57.9 |
+
+### 검출기별 COCO 정확도
+
+<!-- ocean:data x="검출기" y="AP,AP50,AP75,APS,APM,APL" concepts="yolov3,retinanet,yolov2,coco" condition="COCO test-dev" where="표 3" -->
+
+| 검출기 | 바탕 네트워크 | AP (%) | AP50 (%) | AP75 (%) | APS (%) | APM (%) | APL (%) |
+| --- | --- | --: | --: | --: | --: | --: | --: |
+| Faster R-CNN+++ | ResNet-101-C4 | 34.9 | 55.7 | 37.4 | 15.6 | 38.7 | 50.9 |
+| Faster R-CNN w FPN | ResNet-101-FPN | 36.2 | 59.1 | 39.0 | 18.2 | 39.0 | 48.2 |
+| Faster R-CNN by G-RMI | Inception-ResNet-v2 | 34.7 | 55.5 | 36.7 | 13.5 | 38.1 | 52.0 |
+| Faster R-CNN w TDM | Inception-ResNet-v2-TDM | 36.8 | 57.7 | 39.2 | 16.2 | 39.8 | 52.1 |
+| YOLOv2 | DarkNet-19 | 21.6 | 44.0 | 19.2 | 5.0 | 22.4 | 35.5 |
+| SSD513 | ResNet-101-SSD | 31.2 | 50.4 | 33.3 | 10.2 | 34.5 | 49.8 |
+| DSSD513 | ResNet-101-DSSD | 33.2 | 53.3 | 35.2 | 13.0 | 35.4 | 51.1 |
+| RetinaNet R-101 | ResNet-101-FPN | 39.1 | 59.1 | 42.3 | 21.8 | 42.7 | 50.2 |
+| RetinaNet X-101 | ResNeXt-101-FPN | 40.8 | 61.1 | 44.1 | 24.1 | 44.2 | 51.2 |
+| YOLOv3 608×608 | Darknet-53 | 33.0 | 57.9 | 34.4 | 18.3 | 35.4 | 41.9 |

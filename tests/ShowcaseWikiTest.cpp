@@ -132,6 +132,7 @@ constexpr const char* kInputSizeTable = "입력 크기에 따른 정확도와 �
 constexpr const char* kVocDetectorsTable = "검출기별 VOC 2007 정확도";
 constexpr const char* kCocoTable = "입력 크기별 COCO 정확도";
 constexpr const char* kTimeTable = "처리 시간과 AP50";
+constexpr const char* kCocoDetectorsTable = "검출기별 COCO 정확도";
 constexpr const char* kTwoStageVocTable = "2단계 검출기의 VOC 2007 정확도";
 constexpr const char* kTrainTestTimeTable = "학습 · 시험 시간";
 constexpr const char* kMonthlyTable = "월별 응답 시간";
@@ -150,7 +151,7 @@ struct ExpectedTable
     const char* pSeries;
     bool bCumulative;
 };
-constexpr int kTableCount = 12;
+constexpr int kTableCount = 13;
 const QVector<ExpectedTable> kTables {
     { kYolo, kSpeedTable, "FPS", EColumnKind::QUANTITY, { "mAP" }, "구분", false },
     { kYolo9000, kStepsTable, "단계", EColumnKind::ORDINAL, { "mAP" }, "", true },
@@ -158,6 +159,7 @@ const QVector<ExpectedTable> kTables {
     { kYolo9000, kVocDetectorsTable, "검출기", EColumnKind::NOMINAL, { "mAP" }, "", false },
     { kYolov3, kCocoTable, "입력 크기", EColumnKind::ORDINAL, { "AP", "AP50" }, "", false },
     { kYolov3, kTimeTable, "시간", EColumnKind::QUANTITY, { "AP50" }, "", false },
+    { kYolov3, kCocoDetectorsTable, "검출기", EColumnKind::NOMINAL, { "AP", "AP50", "AP75", "APS", "APM", "APL" }, "", false },
     { kTwoStageNote, kTwoStageVocTable, "방법", EColumnKind::NOMINAL, { "mAP" }, "", false },
     { kTwoStageNote, kTrainTestTimeTable, "방법", EColumnKind::NOMINAL, { "학습 시간", "시험 시간" }, "", false },
     { kPaymentPlan, kMonthlyTable, "월", EColumnKind::ORDINAL, { "p50", "p95" }, "", false },
@@ -191,6 +193,7 @@ const QVector<ExpectedColumn> kColumnKinds {
     { kTimeTable, "입력 크기", EColumnKind::QUANTITY },       // ordered 가 없는 숫자 열(축이 아니다)
     { kLoadTable, "동시 사용자", EColumnKind::QUANTITY },     // 천 단위 쉼표(1,000)
     { kSpeedTable, "학습", EColumnKind::NOMINAL },            // 축이 아닌 범주 열(2007+2012)
+    { kCocoDetectorsTable, "바탕 네트워크", EColumnKind::NOMINAL },   // 축이 아닌 범주 열(히트맵은 읽지 않는다)
 };
 
 // §3 그 밖: y 열의 단위(y 순서대로)
@@ -203,10 +206,11 @@ const QVector<ExpectedUnits> kYUnits {
     { kInputSizeTable, { "%", "" } },       // 단위가 다르다(% · 없음)
     { kCocoTable, { "%", "%" } },           // 단위가 같은 y 둘
     { kTrainTestTimeTable, { "h", "s" } },  // 단위가 다르다(h · s)
+    { kCocoDetectorsTable, { "%", "%", "%", "%", "%", "%" } },   // 단위가 같은 y 여섯(히트맵은 y 열마다 색 눈금)
 };
 
 // §3 그 밖 · 시험하는 것
-const QVector<NameCount> kTableRows { { kVocDetectorsTable, 7 }, { kTwoStageVocTable, 3 } };
+const QVector<NameCount> kTableRows { { kVocDetectorsTable, 7 }, { kTwoStageVocTable, 3 }, { kCocoDetectorsTable, 10 } };
 const QStringList kSpeedSeries { "실시간", "실시간 아님" };       // 계열 2개
 constexpr double kSpeedXMin = 0.5;                                 // 넓은 x 범위(0.5–155)
 constexpr double kSpeedXMax = 155;
@@ -767,7 +771,7 @@ private slots:
         QCOMPARE(vecNames, kDocumentsByLearned);   // 다르면 처음 다른 자리를 보여 준다
     }
 
-    // §3: 표는 12개이고 모두 README 의 표다
+    // §3: 표는 13개이고 모두 README 의 표다
     void tablesAreAllListed()
     {
         QStringList vecTitles;

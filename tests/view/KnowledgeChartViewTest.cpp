@@ -6,8 +6,10 @@
 #include "ViewTestSupport.h"
 
 #include <QMap>
+#include <QPair>
 #include <QTest>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -15,7 +17,7 @@
 namespace
 {
 // ================================================================================================
-// 기대값: examples/showcase/README.md §3 의 표 12개(차트 종류는 KnowledgeChartBuilderTest 가 본다).
+// 기대값: examples/showcase/README.md §3 의 표 13개(차트 종류는 KnowledgeChartBuilderTest 가 본다).
 // ================================================================================================
 
 // 표 제목(PNG 이름의 번호 순)
@@ -26,20 +28,22 @@ const QStringList kTableTitles {
     QStringLiteral("검출기별 VOC 2007 정확도"),                        // 4 막대
     QStringLiteral("입력 크기별 COCO 정확도"),                         // 5 선 둘
     QStringLiteral("처리 시간과 AP50"),                                // 6 산점도
-    QStringLiteral("2단계 검출기의 VOC 2007 정확도"),                   // 7 막대
-    QStringLiteral("학습 · 시험 시간"),                                // 8 나란한 막대, 축 둘, 빈 값
-    QStringLiteral("월별 응답 시간"),                                  // 9 선 둘, 빈 값에서 끊긴다
-    QStringLiteral("결제 수단별 비중"),                                // 10 막대
-    QStringLiteral("동시 사용자와 응답 시간"),                          // 11 산점도
-    QStringLiteral("기능 우선순위"),                                   // 12 그리지 않는다
+    QStringLiteral("검출기별 COCO 정확도"),                            // 7 히트맵(검출기 10 × AP … APL 6)
+    QStringLiteral("2단계 검출기의 VOC 2007 정확도"),                   // 8 막대
+    QStringLiteral("학습 · 시험 시간"),                                // 9 나란한 막대, 축 둘, 빈 값
+    QStringLiteral("월별 응답 시간"),                                  // 10 선 둘, 빈 값에서 끊긴다
+    QStringLiteral("결제 수단별 비중"),                                // 11 막대
+    QStringLiteral("동시 사용자와 응답 시간"),                          // 12 산점도
+    QStringLiteral("기능 우선순위"),                                   // 13 그리지 않는다
 };
 constexpr int kSpeedChart = 0;
 constexpr int kStepsChart = 1;
 constexpr int kInputSizeChart = 2;
 constexpr int kVocDetectorsChart = 3;
-constexpr int kTrainTestChart = 7;
-constexpr int kMonthlyChart = 8;
-constexpr int kPriorityChart = 11;
+constexpr int kHeatmapChart = 6;
+constexpr int kTrainTestChart = 8;
+constexpr int kMonthlyChart = 9;
+constexpr int kPriorityChart = 12;
 
 // 알려진 표시: 검출기별 VOC 2007 정확도의 YOLO 막대(넷째 범주, 63.4 %)
 constexpr int kYoloBar = 3;
@@ -60,6 +64,24 @@ constexpr const char* kFastestValue = "52.7%";
 constexpr int kDecreasingStep = 3;
 // 입력 크기 표: FPS 계열(오른쪽 축)
 constexpr int kFpsSeries = 1;
+// 히트맵: 행 10(검출기) × 열 6(AP · AP50 · AP75 · APS · APM · APL). AP 열에서 가장 큰 값은 RetinaNet X-101(40.8), 가장 작은 값은 YOLOv2(21.6)
+constexpr int kHeatmapRows = 10;
+constexpr int kHeatmapColumns = 6;
+constexpr int kApColumn = 0;
+constexpr int kHighestApRow = 8;
+constexpr int kLowestApRow = 4;
+constexpr const char* kLowestApTip = "YOLOv2 · AP: 21.6%";   // 마우스 올림: 행 이름 · 열 이름: 값 단위
+constexpr double kCellGap = 2;               // 칸 사이 바탕 색 틈(px)
+constexpr double kMinFillTextContrast = 4.5; // 채움 위 글자 대비(WCAG 본문)
+constexpr double kRampMiddle = 0.5;          // 범위가 0 인 색 눈금의 칸 색: 크기 눈금의 가운데
+constexpr const char* kEmptyCellLabel = "값 없음";
+constexpr const char* kNoValueTitle = "그릴 값이 없다";
+const QSize kHeatmapLabelSize(640, 420);     // 긴 이름이 줄어드는 작은 위젯
+// 색 눈금 하나인 히트맵의 긴 y 열 이름(다 쓰면 색 범례가 위젯 밖으로 나간다). 값은 10 · 30 ms
+constexpr const char* kLongScaleName = "이미지 한 장을 처리하는 데 걸린 시간의 평균값(배치 크기 1, GPU 한 장, 전처리와 후처리를 모두 넣은 값)";
+constexpr const char* kLongScaleUnit = "ms";
+constexpr double kLongScaleLow = 10;
+constexpr double kLongScaleHigh = 30;
 
 constexpr const char* kPriorityWord = "우선순위";   // NONE 의 까닭(경고)에 나오는 열 이름
 const QSize kSmallSize(420, 300);
@@ -123,9 +145,105 @@ ChartSpec MakeSyntheticSpec(EChartType type, double yMin, double yMax, double va
     spec.vecSeries << series;
     return spec;
 }
+
+// 히트맵 합성 설정: 행 가 · 나 · 다, 열 AP(%, 10 · 빈 값 · 30)와 FPS(가 에만 점 5, 범위 0). 나 · FPS 칸은 점이 없다
+ChartSpec MakeSyntheticHeatmap()
+{
+    ChartSpec spec;
+    spec.eType = EChartType::HEATMAP;
+    spec.strTitle = QStringLiteral("합성 히트맵");
+    spec.strCaption = QStringLiteral("칸 시험");
+    spec.xAxis.strTitle = QStringLiteral("방법");
+    spec.xAxis.vecCategories = QStringList { QStringLiteral("가"), QStringLiteral("나"), QStringLiteral("다") };
+    spec.xAxis.dMin = -kCategoryHalfWidth;
+    spec.xAxis.dMax = spec.xAxis.vecCategories.size() - kCategoryHalfWidth;
+    ChartAxis apAxis;
+    apAxis.strTitle = QStringLiteral("AP");
+    apAxis.strUnit = QStringLiteral("%");
+    apAxis.dMin = 10;
+    apAxis.dMax = 30;
+    ChartAxis fpsAxis;
+    fpsAxis.strTitle = QStringLiteral("FPS");
+    fpsAxis.dMin = 5;
+    fpsAxis.dMax = 5;
+    spec.vecYAxes << apAxis << fpsAxis;
+    ChartSeries ap;
+    ap.strName = QStringLiteral("AP");
+    ap.strUnit = QStringLiteral("%");
+    ap.iAxis = 0;
+    const QVector<std::optional<double>> vecApValues { 10.0, std::nullopt, 30.0 };
+    for (int iRow = 0; iRow < vecApValues.size(); ++iRow)
+    {
+        ChartPoint point;
+        point.dX = iRow;
+        point.optY = vecApValues[iRow];
+        point.strLabel = spec.xAxis.vecCategories[iRow];
+        ap.vecPoints << point;
+    }
+    ChartSeries fps;
+    fps.strName = QStringLiteral("FPS");
+    fps.iAxis = 1;
+    ChartPoint fpsPoint;
+    fpsPoint.dX = 0;
+    fpsPoint.optY = 5;
+    fpsPoint.strLabel = spec.xAxis.vecCategories[0];
+    fps.vecPoints << fpsPoint;
+    spec.vecSeries << ap << fps;
+    return spec;
 }
 
-// 차트 위젯(KnowledgeChartView, design/Views.md §6 · §7)을 showcase 표 12개의 차트 설정으로 시험한다(offscreen).
+// 색 눈금 하나인 히트맵 합성 설정: 행 가 · 나, y 열 하나(name · unit)에 값 low · high
+ChartSpec MakeSingleScaleHeatmap(const QString& name, const QString& unit, double low, double high)
+{
+    ChartSpec spec;
+    spec.eType = EChartType::HEATMAP;
+    spec.strTitle = QStringLiteral("긴 y 이름");
+    spec.xAxis.strTitle = QStringLiteral("방법");
+    spec.xAxis.vecCategories = QStringList { QStringLiteral("가"), QStringLiteral("나") };
+    spec.xAxis.dMin = -kCategoryHalfWidth;
+    spec.xAxis.dMax = spec.xAxis.vecCategories.size() - kCategoryHalfWidth;
+    ChartAxis axis;
+    axis.strTitle = name;
+    axis.strUnit = unit;
+    axis.dMin = low;
+    axis.dMax = high;
+    spec.vecYAxes << axis;
+    ChartSeries series;
+    series.strName = name;
+    series.strUnit = unit;
+    const QVector<double> vecValues { low, high };
+    for (int iRow = 0; iRow < vecValues.size(); ++iRow)
+    {
+        ChartPoint point;
+        point.dX = iRow;
+        point.optY = vecValues[iRow];
+        point.strLabel = spec.xAxis.vecCategories[iRow];
+        series.vecPoints << point;
+    }
+    spec.vecSeries << series;
+    return spec;
+}
+
+// rect 안에서 그 색과 똑같은 점이 있는 가장 왼쪽 · 가장 오른쪽 x. 없으면 (-1, -1)
+QPair<int, int> FindColorColumns(const QImage& image, const QRect& rect, const QColor& color)
+{
+    const QRect rectInside = rect.intersected(image.rect());
+    QPair<int, int> pairColumns(-1, -1);
+    for (int iY = rectInside.top(); iY <= rectInside.bottom(); ++iY)
+    {
+        for (int iX = rectInside.left(); iX <= rectInside.right(); ++iX)
+        {
+            if (image.pixelColor(iX, iY) != color)
+                continue;
+            pairColumns.first = pairColumns.first < 0 ? iX : std::min(pairColumns.first, iX);
+            pairColumns.second = std::max(pairColumns.second, iX);
+        }
+    }
+    return pairColumns;
+}
+}
+
+// 차트 위젯(KnowledgeChartView, design/Views.md §6 · §7 · design/MoreViews.md §4.3)을 showcase 표 13개의 차트 설정으로 시험한다(offscreen).
 class KnowledgeChartViewTest : public QObject
 {
     Q_OBJECT
@@ -153,7 +271,7 @@ private slots:
         QVERIFY(m_vecSpecs[kPriorityChart].eType == EChartType::NONE);
     }
 
-    // 표 12개의 차트가 1600 × 1000 에 비지 않게 그려지고, 두 번 그리면 같다. 밝은 · 어두운 테마(PNG 를 남길 수 있다)
+    // 표 13개의 차트가 1600 × 1000 에 비지 않게 그려지고, 두 번 그리면 같다. 밝은 · 어두운 테마(PNG 를 남길 수 있다)
     void rendersEveryChart_data()
     {
         QTest::addColumn<int>("chart");
@@ -191,7 +309,8 @@ private slots:
                 const QRectF rectMark = view.GetMarkRect(iSeries, iPoint);
                 const QString strWhat = spec.vecSeries[iSeries].strName + QLatin1Char('/') + spec.vecSeries[iSeries].vecPoints[iPoint].strLabel
                                         + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectMark);
-                if (!spec.vecSeries[iSeries].vecPoints[iPoint].optY)
+                // 값이 없는 점은 표시가 없다(히트맵은 빈 칸을 테두리와 "—" 로 그려 칸이 있다)
+                if (!spec.vecSeries[iSeries].vecPoints[iPoint].optY && spec.eType != EChartType::HEATMAP)
                 {
                     QVERIFY2(rectMark.isEmpty(), qUtf8Printable(strWhat));
                     continue;
@@ -413,7 +532,7 @@ private slots:
         }
     }
 
-    // 범례: 계열이 둘 이상이면 있고, 하나뿐이면 없다
+    // 범례: 계열이 둘 이상이면 있고, 하나뿐이면 없다(히트맵의 색 범례는 heatmapDrawsCells 가 본다)
     void legendOnlyForSeveralSeries()
     {
         KnowledgeChartView view;
@@ -421,7 +540,7 @@ private slots:
         for (const ChartSpec& spec : m_vecSpecs)
         {
             view.SetSpec(spec);
-            if (spec.eType == EChartType::NONE || spec.eType == EChartType::STEP_BAR)
+            if (spec.eType == EChartType::NONE || spec.eType == EChartType::STEP_BAR || spec.eType == EChartType::HEATMAP)
                 continue;
             const bool bLegend = !view.GetLegendRect().isEmpty();
             QVERIFY2(bLegend == (spec.vecSeries.size() > 1), qUtf8Printable(spec.strTitle));
@@ -463,7 +582,7 @@ private slots:
         const double dInfinity = std::numeric_limits<double>::infinity();
         const double dNaN = std::numeric_limits<double>::quiet_NaN();
         const double dHuge = std::numeric_limits<double>::max();
-        for (const EChartType eType : { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER })
+        for (const EChartType eType : { EChartType::BAR, EChartType::STEP_BAR, EChartType::LINE, EChartType::SCATTER, EChartType::HEATMAP })
         {
             const QString strType = GetTypeName(eType);
             QTest::newRow(qPrintable(strType + " zero width")) << static_cast<int>(eType) << 5.0 << 5.0 << 5.0;
@@ -488,7 +607,10 @@ private slots:
         view.SetSpec(spec);
         const QImage image = ViewTestSupport::Render(view);
         QVERIFY(ViewTestSupport::HasEnoughInk(image, VisualMarkdownTheme::MakeLight().background));
-        QVERIFY(!view.GetPlotRect().isEmpty());
+        // 히트맵은 숫자가 아닌 값을 빈 칸으로 본다: 모든 칸이 비면 그림 칸 대신 "그릴 값이 없다" 다
+        const bool bNoHeatmapValue = static_cast<EChartType>(type) == EChartType::HEATMAP && !std::isfinite(value);
+        QCOMPARE(view.GetPlotRect().isEmpty(), bNoHeatmapValue);
+        QCOMPARE(view.GetMessageText().isEmpty(), !bNoHeatmapValue);
         for (int iPoint = 0; iPoint < spec.vecSeries[0].vecPoints.size(); ++iPoint)
         {
             const QRectF rectMark = view.GetMarkRect(0, iPoint);
@@ -549,6 +671,309 @@ private slots:
         QCOMPARE(view.FindPointAt(QPoint(5, 5)), qMakePair(-1, -1));
     }
 
+    // 히트맵(검출기별 COCO 정확도, design/MoreViews.md §4.3): 행 = 검출기(위 → 아래), 열 = AP … APL(왼쪽 → 오른쪽), 칸 사이 2px 바탕 틈.
+    // 그림 칸은 칸 격자이고 색 범례는 그 위다. 칸 색은 그 y 열 색 눈금 자리의 색, 칸 글은 채움과 대비가 큰 글자 색(4.5:1 이상)이다.
+    // 칸 가운데에서 그 점을 찾고, 설명은 "행 이름 · 열 이름: 값 단위" 다
+    void heatmapDrawsCells_data()
+    {
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+    void heatmapDrawsCells()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = dark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+        const ChartSpec& spec = m_vecSpecs[kHeatmapChart];
+        QCOMPARE(spec.eType, EChartType::HEATMAP);
+        QCOMPARE(spec.xAxis.vecCategories.size(), kHeatmapRows);
+        QCOMPARE(spec.vecSeries.size(), kHeatmapColumns);
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::HasEnoughInk(image, theme.background));
+        QCOMPARE(ViewTestSupport::Render(view), image);
+        QCOMPARE(view.GetMessageText(), QString());
+
+        // 색 범례는 칸 격자 위에 있고, 눈금의 낮은 끝 · 높은 끝 색이 있다
+        const QRectF rectPlot = view.GetPlotRect();
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectPlot.isEmpty());
+        QVERIFY(!rectLegend.isEmpty());
+        QVERIFY2(rectLegend.bottom() <= rectPlot.top(), qUtf8Printable(ViewTestSupport::DescribeRect(rectLegend) + ViewTestSupport::DescribeRect(rectPlot)));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetRampColor(0)));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetRampColor(1)));
+
+        QRectF rectCells;
+        for (int iColumn = 0; iColumn < kHeatmapColumns; ++iColumn)
+        {
+            const ChartSeries& series = spec.vecSeries[iColumn];
+            const ChartAxis& axis = spec.vecYAxes[series.iAxis];
+            for (int iRow = 0; iRow < kHeatmapRows; ++iRow)
+            {
+                const ChartPoint& point = series.vecPoints[iRow];
+                const QRectF rectCell = view.GetMarkRect(iColumn, iRow);
+                const QString strWhat = series.strName + QLatin1Char('/') + point.strLabel + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectCell);
+                QVERIFY2(!rectCell.isEmpty(), qUtf8Printable(strWhat));
+                QVERIFY2(rectPlot.contains(rectCell), qUtf8Printable(strWhat + ViewTestSupport::DescribeRect(rectPlot)));
+                rectCells = rectCells.united(rectCell);
+                QCOMPARE(view.FindPointAt(rectCell.center().toPoint()), qMakePair(iColumn, iRow));
+
+                // 칸은 행 · 열 격자에 맞고 이웃 칸과 2px 틈으로 떨어진다
+                if (iColumn > 0)
+                {
+                    const QRectF rectLeft = view.GetMarkRect(iColumn - 1, iRow);
+                    QCOMPARE(rectCell.top(), rectLeft.top());
+                    QCOMPARE(rectCell.bottom(), rectLeft.bottom());
+                    QVERIFY2(std::abs(rectCell.left() - rectLeft.right() - kCellGap) < kPixelTolerance, qUtf8Printable(strWhat));
+                }
+                if (iRow > 0)
+                {
+                    const QRectF rectAbove = view.GetMarkRect(iColumn, iRow - 1);
+                    QCOMPARE(rectCell.left(), rectAbove.left());
+                    QCOMPARE(rectCell.right(), rectAbove.right());
+                    QVERIFY2(std::abs(rectCell.top() - rectAbove.bottom() - kCellGap) < kPixelTolerance, qUtf8Printable(strWhat));
+                }
+
+                // 칸 색: 그 y 열 색 눈금에서 (값 − 가장 작은 값) / (가장 큰 값 − 가장 작은 값) 자리의 색
+                const double dT = (*point.optY - axis.dMin) / (axis.dMax - axis.dMin);
+                const QColor fill = theme.GetRampColor(dT);
+                const QColor pixel = image.pixelColor(rectCell.topLeft().toPoint() + QPoint(1, 1));
+                QVERIFY2(pixel == fill, qUtf8Printable(strWhat + QLatin1Char(' ') + pixel.name() + QStringLiteral(" 기대 ") + fill.name()));
+
+                // 칸 글: 채움과 대비가 큰 쪽(fillTextDark · fillTextLight)으로 쓰고 4.5:1 이상이다
+                const bool bLightText = ViewTestSupport::GetContrast(theme.fillTextLight, fill) > ViewTestSupport::GetContrast(theme.fillTextDark, fill);
+                const QColor textColor = bLightText ? theme.fillTextLight : theme.fillTextDark;
+                QVERIFY2(ViewTestSupport::GetContrast(textColor, fill) >= kMinFillTextContrast, qUtf8Printable(strWhat + fill.name()));
+                QVERIFY2(ViewTestSupport::HasColorIn(image, rectCell.toAlignedRect(), textColor), qUtf8Printable(strWhat + QLatin1Char(' ') + textColor.name()));
+
+                // 설명: 행 이름 · 열 이름: 값 단위
+                const QString strTip = view.GetToolTipAt(rectCell.center().toPoint());
+                QVERIFY2(strTip.startsWith(point.strLabel + QStringLiteral(" · ") + series.strName + QStringLiteral(": ")) && strTip.endsWith(QLatin1Char('%')),
+                         qUtf8Printable(strTip));
+            }
+        }
+        // 칸 격자 전체가 그림 칸이다
+        for (const double dDifference : { rectCells.left() - rectPlot.left(), rectCells.top() - rectPlot.top(), rectCells.right() - rectPlot.right(),
+                                          rectCells.bottom() - rectPlot.bottom() })
+            QVERIFY2(std::abs(dDifference) < kPixelTolerance, qUtf8Printable(ViewTestSupport::DescribeRect(rectCells) + ViewTestSupport::DescribeRect(rectPlot)));
+
+        // AP 열: 가장 큰 값(RetinaNet X-101)은 높은 끝 색, 가장 작은 값(YOLOv2)은 낮은 끝 색. 설명은 값과 단위
+        const QRectF rectHighest = view.GetMarkRect(kApColumn, kHighestApRow);
+        const QRectF rectLowest = view.GetMarkRect(kApColumn, kLowestApRow);
+        QCOMPARE(image.pixelColor(rectHighest.topLeft().toPoint() + QPoint(1, 1)), theme.GetRampColor(1));
+        QCOMPARE(image.pixelColor(rectLowest.topLeft().toPoint() + QPoint(1, 1)), theme.GetRampColor(0));
+        QCOMPARE(view.GetToolTipAt(rectLowest.center().toPoint()), QString::fromUtf8(kLowestApTip));
+        // 칸 밖(격자 아래)에서는 찾지 않는다
+        QCOMPARE(view.FindPointAt(QPoint(rectPlot.center().x(), rectPlot.bottom() + 4)), qMakePair(-1, -1));
+    }
+
+    // 히트맵의 빈 칸: 값이 없는 점은 채우지 않고 격자 색 1px 테두리와 흐린 "—" 로 그린다(칸은 있어 찾을 수 있다).
+    // 점이 없는 칸(나 · FPS)도 같이 그리고, 찾을 점은 없지만 설명은 "값 없음" 이다. 범위가 0 인 눈금(FPS 5–5)의 칸은 가운데 색이다
+    void heatmapEmptyCells()
+    {
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        const ChartSpec spec = MakeSyntheticHeatmap();
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-heatmap-empty-light")));
+
+        const QString strEmptyLabel = QString::fromUtf8(kEmptyCellLabel);
+        const QRectF rectEmpty = view.GetMarkRect(0, 1);
+        QVERIFY(!rectEmpty.isEmpty());
+        QCOMPARE(view.FindPointAt(rectEmpty.center().toPoint()), qMakePair(0, 1));
+        QCOMPARE(view.GetToolTipAt(rectEmpty.center().toPoint()), QStringLiteral("나 · AP: ") + strEmptyLabel);
+        QCOMPARE(image.pixelColor(rectEmpty.topLeft().toPoint() + QPoint(3, 3)), theme.background);   // 채우지 않는다
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectEmpty.toAlignedRect(), theme.grid));          // 1px 테두리
+        QVERIFY(ViewTestSupport::CountInk(image.copy(rectEmpty.toAlignedRect().adjusted(2, 2, -2, -2)), theme.background) > 0);   // 가운데 "—"
+
+        // 점이 없는 칸: 나 행 × FPS 열
+        const QRectF rectFps = view.GetMarkRect(1, 0);
+        const QPoint ptMissing(static_cast<int>(rectFps.center().x()), static_cast<int>(rectEmpty.center().y()));
+        QCOMPARE(view.FindPointAt(ptMissing), qMakePair(-1, -1));
+        QCOMPARE(view.GetToolTipAt(ptMissing), QStringLiteral("나 · FPS: ") + strEmptyLabel);
+        QCOMPARE(image.pixelColor(QPoint(static_cast<int>(rectFps.left()) + 3, static_cast<int>(rectEmpty.top()) + 3)), theme.background);
+
+        // 색: AP 10 은 낮은 끝, 30 은 높은 끝, FPS(범위 0)는 가운데
+        QCOMPARE(image.pixelColor(view.GetMarkRect(0, 0).topLeft().toPoint() + QPoint(1, 1)), theme.GetRampColor(0));
+        QCOMPARE(image.pixelColor(view.GetMarkRect(0, 2).topLeft().toPoint() + QPoint(1, 1)), theme.GetRampColor(1));
+        QCOMPARE(image.pixelColor(rectFps.topLeft().toPoint() + QPoint(1, 1)), theme.GetRampColor(kRampMiddle));
+        // 색 범례: 눈금이 둘이라 양 끝은 낮음 · 높음이다(색은 낮은 끝 · 높은 끝)
+        const QRect rectLegend = view.GetLegendRect().toAlignedRect();
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend, theme.GetRampColor(0)));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend, theme.GetRampColor(1)));
+    }
+
+    // 히트맵의 색(크기 눈금 · 채움 위 글자)은 다른 차트에 쓰이지 않는다: 그 값을 바꿔도 막대 · 단계 막대 · 선 · 산점도 · 그리지 않는 표는 같은 그림이다
+    void otherChartsIgnoreHeatmapColors()
+    {
+        VisualMarkdownTheme changed = VisualMarkdownTheme::MakeLight();
+        changed.vecSequentialRamp = { QColor(Qt::red), QColor(Qt::green) };
+        changed.fillTextDark = QColor(Qt::magenta);
+        changed.fillTextLight = QColor(Qt::cyan);
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        for (const ChartSpec& spec : m_vecSpecs)
+        {
+            if (spec.eType == EChartType::HEATMAP)
+                continue;
+            view.SetSpec(spec);
+            view.SetTheme(VisualMarkdownTheme::MakeLight());
+            const QImage image = ViewTestSupport::Render(view);
+            view.SetTheme(changed);
+            QVERIFY2(ViewTestSupport::Render(view) == image, qUtf8Printable(spec.strTitle));
+        }
+    }
+
+    // 색 범례: 색 눈금이 하나면 양 끝에 가장 작은 값 · 가장 큰 값(단위 붙임), 여럿이면 낮음 · 높음. 범례에 올리면 눈금마다 이름과 범위를 쓴다
+    void heatmapLegendDescribesScales()
+    {
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetSpec(m_vecSpecs[kHeatmapChart]);
+        const QString strTip = view.GetToolTipAt(view.GetLegendRect().center().toPoint());
+        QCOMPARE(strTip.split(QLatin1Char('\n')).size(), kHeatmapColumns);
+        for (const QString& strScale : { QStringLiteral("AP: 21.6% – 40.8%"), QStringLiteral("APS: 5% – 24.1%"), QStringLiteral("APL: 35.5% – 52.1%") })
+            QVERIFY2(strTip.contains(strScale), qUtf8Printable(strTip));
+
+        // 색 눈금 하나(합성 히트맵에서 FPS 열을 뺀다)
+        ChartSpec single = MakeSyntheticHeatmap();
+        single.vecSeries.removeLast();
+        single.vecYAxes.removeLast();
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        view.SetTheme(theme);
+        view.SetSpec(single);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-heatmap-single-light")));
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectLegend.isEmpty() && rectLegend.bottom() <= view.GetPlotRect().top());
+        QCOMPARE(view.GetToolTipAt(rectLegend.center().toPoint()), QStringLiteral("AP: 10% – 30%"));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetRampColor(0)));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectLegend.toAlignedRect(), theme.GetRampColor(1)));
+    }
+
+    // 색 범례는 위젯보다 넓어지지 않는다(design/MoreViews.md §4.3): 색 눈금이 하나일 때 앞에 쓰는 긴 y 열 이름은 '…' 로 줄이고,
+    // 띠와 양 끝 값(10 ms · 30 ms)은 줄이지 않고 위젯 안에 그린다. 범례 위 설명에는 이름을 다 쓴다
+    void heatmapLegendElidesLongScaleName()
+    {
+        const QString strName = QString::fromUtf8(kLongScaleName);
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        KnowledgeChartView view;
+        view.resize(kHeatmapLabelSize);
+        view.SetTheme(theme);
+        view.SetSpec(MakeSingleScaleHeatmap(strName, QString::fromUtf8(kLongScaleUnit), kLongScaleLow, kLongScaleHigh));
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-heatmap-long-scale-name-light")));
+
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY2(!rectLegend.isEmpty() && QRectF(view.rect()).contains(rectLegend), qUtf8Printable(ViewTestSupport::DescribeRect(rectLegend)));
+        QVERIFY(rectLegend.bottom() <= view.GetPlotRect().top());
+
+        // 띠: 낮은 끝 · 높은 끝 색이 범례 안에 있다(높은 끝이 낮은 끝보다 오른쪽)
+        const QRect rectLegendPixels = rectLegend.toAlignedRect();
+        const QPair<int, int> pairLow = FindColorColumns(image, rectLegendPixels, theme.GetRampColor(0));
+        const QPair<int, int> pairHigh = FindColorColumns(image, rectLegendPixels, theme.GetRampColor(1));
+        QVERIFY2(pairLow.first >= 0 && pairHigh.second >= 0 && pairLow.first < pairHigh.second,
+                 qUtf8Printable(QStringLiteral("띠 %1 … %2").arg(pairLow.first).arg(pairHigh.second)));
+        // 양 끝 값(글자 색): 띠 왼쪽에 가장 작은 값, 띠 오른쪽에 가장 큰 값이 범례 안에 있다
+        const QRect rectBeforeBar(rectLegendPixels.left(), rectLegendPixels.top(), pairLow.first - rectLegendPixels.left(), rectLegendPixels.height());
+        const QRect rectAfterBar(pairHigh.second + 1, rectLegendPixels.top(), rectLegendPixels.right() - pairHigh.second, rectLegendPixels.height());
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectBeforeBar, theme.text));
+        QVERIFY(ViewTestSupport::HasColorIn(image, rectAfterBar, theme.text));
+
+        // 범례 위 설명: 줄이지 않은 이름과 범위
+        const QString strTip = view.GetToolTipAt(rectLegend.center().toPoint());
+        QVERIFY2(strTip.contains(strName) && strTip.contains(QStringLiteral("10 ms – 30 ms")), qUtf8Printable(strTip));
+    }
+
+    // 모든 칸이 비면 다른 차트처럼 "그릴 값이 없다" 와 경고를 쓰고, 그림 칸 · 찾을 칸이 없다. 값이 하나라도 있으면 다시 칸을 그린다
+    void heatmapWithoutValuesShowsMessage()
+    {
+        ChartSpec spec = MakeSyntheticHeatmap();
+        for (ChartSeries& series : spec.vecSeries)
+            for (ChartPoint& point : series.vecPoints)
+                point.optY.reset();
+        spec.vecWarnings << QStringLiteral("합성 경고");
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth / 2, ViewTestSupport::kSnapshotHeight / 2);
+        view.SetSpec(spec);
+        QVERIFY(ViewTestSupport::HasEnoughInk(ViewTestSupport::Render(view), VisualMarkdownTheme::MakeLight().background));
+        const QString strMessage = view.GetMessageText();
+        QVERIFY2(strMessage.startsWith(QString::fromUtf8(kNoValueTitle)) && strMessage.contains(QStringLiteral("합성 경고")), qUtf8Printable(strMessage));
+        QVERIFY(view.GetPlotRect().isEmpty());
+        QVERIFY(view.GetLegendRect().isEmpty());
+        QVERIFY(view.GetMarkRect(0, 0).isEmpty());
+        QCOMPARE(view.FindPointAt(view.rect().center()), qMakePair(-1, -1));
+        QCOMPARE(view.GetToolTipAt(view.rect().center()), QString());
+
+        view.SetSpec(MakeSyntheticHeatmap());
+        QCOMPARE(view.GetMessageText(), QString());
+        QVERIFY(!view.GetPlotRect().isEmpty());
+    }
+
+    // 넘치는 행 · 열 이름은 '…' 로 줄이고, 그 이름 위에 올리면 설명에 다 쓴다(칸 설명에도 다 쓴다). 이름은 위젯 밖으로 나가지 않는다
+    void heatmapLongNamesShowInToolTips()
+    {
+        ChartSpec spec = MakeSyntheticHeatmap();
+        const QString strLongRow = QStringLiteral("아주 긴 행 이름이라 행 이름 칸의 너비를 한참 넘쳐서 줄여 써야 하는 검출기 이름");
+        const QString strLongColumn = QStringLiteral("아주 긴 열 이름 · 칸 너비를 넘쳐 두 줄로 접어도 다 들어가지 않는 계열 이름 · 끝");
+        spec.xAxis.vecCategories[2] = strLongRow;
+        spec.vecSeries[0].vecPoints[2].strLabel = strLongRow;
+        spec.vecSeries[0].strName = strLongColumn;
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        KnowledgeChartView view;
+        view.resize(kHeatmapLabelSize);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-heatmap-long-names-light")));
+        const QRectF rectPlot = view.GetPlotRect();
+        QVERIFY(QRectF(view.rect()).contains(rectPlot));
+        const QRectF rectCell = view.GetMarkRect(0, 2);
+        QVERIFY(!rectCell.isEmpty());
+        QCOMPARE(view.GetToolTipAt(QPoint(static_cast<int>(rectPlot.left()) - 2, static_cast<int>(rectCell.center().y()))), strLongRow);
+        QCOMPARE(view.GetToolTipAt(QPoint(static_cast<int>(rectCell.center().x()), static_cast<int>(rectPlot.top()) - 2)), strLongColumn);
+        QVERIFY2(view.GetToolTipAt(rectCell.center().toPoint()).startsWith(strLongRow + QStringLiteral(" · ") + strLongColumn + QStringLiteral(": ")),
+                 qUtf8Printable(view.GetToolTipAt(rectCell.center().toPoint())));
+        for (int iY = 0; iY < image.height(); ++iY)
+        {
+            QCOMPARE(image.pixelColor(1, iY), theme.background);
+            QCOMPARE(image.pixelColor(image.width() - 2, iY), theme.background);
+        }
+    }
+
+    // 작은 위젯에서도 죽지 않고 칸 격자는 위젯 안이며 칸 가운데에서 그 점을 찾는다(칸이 작아 값 글은 줄어든다. 눈으로 보려고 PNG 를 남긴다)
+    void heatmapSmallWidget()
+    {
+        const ChartSpec& spec = m_vecSpecs[kHeatmapChart];
+        KnowledgeChartView view;
+        view.resize(kSmallSize);
+        view.SetSpec(spec);
+        const QImage image = ViewTestSupport::Render(view);
+        QVERIFY(ViewTestSupport::HasEnoughInk(image, VisualMarkdownTheme::MakeLight().background));
+        QVERIFY(ViewTestSupport::SaveSnapshot(image, QStringLiteral("extra-chart-heatmap-small-light")));
+        QVERIFY(QRectF(view.rect()).contains(view.GetPlotRect()));
+        for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
+        {
+            for (int iPoint = 0; iPoint < spec.vecSeries[iSeries].vecPoints.size(); ++iPoint)
+            {
+                const QRectF rectCell = view.GetMarkRect(iSeries, iPoint);
+                QVERIFY2(!rectCell.isEmpty() && QRectF(view.rect()).contains(rectCell), qUtf8Printable(ViewTestSupport::DescribeRect(rectCell)));
+                QCOMPARE(view.FindPointAt(rectCell.center().toPoint()), qMakePair(iSeries, iPoint));
+            }
+        }
+        view.resize(40, 30);
+        ViewTestSupport::Render(view);
+        view.FindPointAt(QPoint(20, 15));
+        view.GetToolTipAt(QPoint(20, 15));
+    }
+
 private:
     static QString GetTypeName(EChartType type)
     {
@@ -559,6 +984,7 @@ private:
         case EChartType::STEP_BAR: return QStringLiteral("stepbar");
         case EChartType::LINE: return QStringLiteral("line");
         case EChartType::SCATTER: return QStringLiteral("scatter");
+        case EChartType::HEATMAP: return QStringLiteral("heatmap");
         }
         return QStringLiteral("unknown");
     }

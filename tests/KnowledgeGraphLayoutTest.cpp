@@ -62,7 +62,7 @@ struct DocumentLinks
     int iWeightSum;
 };
 const QVector<DocumentLinks> kDocumentLinks {
-    { kYoloTitle, 5, 13 }, { kYolo9000Title, 7, 20 }, { kYolov3Title, 5, 13 },
+    { kYoloTitle, 5, 13 }, { kYolo9000Title, 7, 20 }, { kYolov3Title, 5, 17 },
     { kTwoStageTitle, 7, 26 }, { kFocalLossTitle, 4, 9 }, { kPaymentTitle, 9, 23 },
 };
 struct LinkWeight
@@ -74,7 +74,10 @@ struct LinkWeight
 const QVector<LinkWeight> kLinkWeights {
     { kYoloTitle, "yolo", 5 },             // 카드 2 · 관계 끝 2 · 표 1
     { kYolo9000Title, "yolov2", 9 },       // 카드 2 · 관계 끝 4 · 표 3
-    { kYolov3Title, "yolov3", 7 },         // 카드 2 · 관계 끝 3(빠진 Darknet-53 관계의 from 도 센다) · 표 2
+    { kYolov3Title, "yolov3", 8 },         // 카드 2 · 관계 끝 3(빠진 Darknet-53 관계의 from 도 센다) · 표 3
+    { kYolov3Title, "retinanet", 3 },      // 카드 1 · 관계 끝 1 · 표 1(검출기별 COCO 정확도)
+    { kYolov3Title, "yolov2", 3 },         // 관계 끝 2 · 표 1(검출기별 COCO 정확도)
+    { kYolov3Title, "coco", 2 },           // 표 2
     { kTwoStageTitle, "fast-r-cnn", 7 },   // 카드 1 · 관계 끝 4 · 표 2
     { kPaymentTitle, "승인율", 1 },         // 카드 1
 };

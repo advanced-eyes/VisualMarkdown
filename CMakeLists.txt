@@ -215,7 +215,7 @@ if(VISUALMARKDOWN_BUILD_TESTS)
         add_test(NAME VisualMarkdownViewerTests COMMAND VisualMarkdownViewerTests)
         set_tests_properties(VisualMarkdownViewerTests PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT}")
 
-        # 스냅샷(cmake -P): 빌드 폴더 안의 새 폴더에 showcase 스냅샷을 찍고 끝 코드 0 · PNG 18개 · snapshot.tsv(기대 파일과 바이트로 같음)를 본다.
+        # 스냅샷(cmake -P): 빌드 폴더 안의 새 폴더에 showcase 스냅샷을 찍고 끝 코드 0 · PNG 19개 · snapshot.tsv(기대 파일과 바이트로 같음)를 본다.
         # 앱이 offscreen · 글꼴 폴더를 스스로 정하는지 보도록 그 환경 변수는 지운다
         add_test(NAME VisualMarkdownViewerSnapshotTest
                  COMMAND ${CMAKE_COMMAND}

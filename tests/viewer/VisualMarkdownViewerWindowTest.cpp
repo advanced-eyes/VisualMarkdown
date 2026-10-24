@@ -33,7 +33,7 @@ const QStringList kViewLabels { "관계망", "계보도", "분류 트리", "타�
 const QStringList kDocumentTitles { "결제 서비스 개편 기획서", "Focal Loss for Dense Object Detection", "2단계 검출기의 흐름",
                                     "YOLOv3: An Incremental Improvement", "YOLO9000: Better, Faster, Stronger",
                                     "You Only Look Once: Unified, Real-Time Object Detection" };
-const QVector<int> kTableCounts { 4, 0, 2, 2, 3, 1 };
+const QVector<int> kTableCounts { 4, 0, 2, 3, 3, 1 };
 constexpr const char* kNoTableText = "고를 표가 없다";
 
 constexpr int kPaymentDocument = 0;
@@ -285,7 +285,7 @@ private slots:
         }
     }
 
-    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도. 고르면 그 종류로, 추천이면 추천 종류로 다시 만든다.
+    // 차트 종류 상자: 추천(그 종류 이름) · 막대 · 단계 막대 · 선 · 산점도 · 히트맵. 고르면 그 종류로, 추천이면 추천 종류로 다시 만든다.
     // 나무의 표 글도 따라가고, 고른 종류는 표마다 기억한다
     void chartTypeBoxRebuildsChart()
     {
@@ -294,9 +294,10 @@ private slots:
         window.SelectTable(kPaymentDocument, kMonthlyTable);
         VisualMarkdownViewerChartPage* pPage = window.GetChartPage();
         QComboBox* pBox = pPage->GetChartTypeBox();
-        const QStringList vecTexts { QStringLiteral("추천(선)"), QStringLiteral("막대"), QStringLiteral("단계 막대"), QStringLiteral("선"), QStringLiteral("산점도") };
+        const QStringList vecTexts { QStringLiteral("추천(선)"), QStringLiteral("막대"), QStringLiteral("단계 막대"), QStringLiteral("선"), QStringLiteral("산점도"),
+                                     QStringLiteral("히트맵") };
         const QVector<int> vecData { VisualMarkdownViewerChartPage::kRecommendedChoice, static_cast<int>(EChartType::BAR), static_cast<int>(EChartType::STEP_BAR),
-                                     static_cast<int>(EChartType::LINE), static_cast<int>(EChartType::SCATTER) };
+                                     static_cast<int>(EChartType::LINE), static_cast<int>(EChartType::SCATTER), static_cast<int>(EChartType::HEATMAP) };
         QCOMPARE(pBox->count(), vecTexts.size());
         for (int iItem = 0; iItem < vecTexts.size(); ++iItem)
         {
@@ -306,7 +307,8 @@ private slots:
         QCOMPARE(pBox->currentIndex(), 0);
         QVERIFY(pBox->isEnabled());
 
-        const QVector<QPair<int, EChartType>> vecChoices { { 1, EChartType::BAR }, { 2, EChartType::STEP_BAR }, { 4, EChartType::SCATTER }, { 3, EChartType::LINE } };
+        const QVector<QPair<int, EChartType>> vecChoices { { 1, EChartType::BAR }, { 2, EChartType::STEP_BAR }, { 4, EChartType::SCATTER }, { 5, EChartType::HEATMAP },
+                                                           { 3, EChartType::LINE } };
         for (const QPair<int, EChartType>& pairChoice : vecChoices)
         {
             pBox->setCurrentIndex(pairChoice.first);

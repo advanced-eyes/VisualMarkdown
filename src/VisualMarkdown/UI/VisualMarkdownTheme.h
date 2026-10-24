@@ -30,6 +30,10 @@ public:
     VisualMarkdownNodeColors GetConceptColors(const QString& kind) const;   // 모르는 종류는 unknownConcept
     QColor GetRelationColor(const QString& kind) const;                     // 모르는 종류는 unknownRelation
     QColor GetSeriesColor(int series) const;                                // 8개를 넘으면 처음부터 되풀이한다(모양으로 가른다)
+    // 크기 눈금의 t 자리(0 낮음 … 1 높음, 밖은 끝으로, 숫자가 아니면 가운데) 색. 이웃한 두 색 사이는 채널마다 선형으로 섞는다. 눈금이 비었으면 text
+    QColor GetRampColor(double t) const;
+    // 채움(히트맵 칸 · 도넛 조각) 위 글자 색: fillTextDark · fillTextLight 가운데 채움과 WCAG 대비가 큰 쪽(같으면 fillTextDark)
+    QColor GetFillTextColor(const QColor& fill) const;
 
 public:
     // 바탕 · 글자 · 격자
@@ -69,6 +73,12 @@ public:
     QColor stepStart;                // 시작 값 막대: 늘어난 값이 아니라 출발점이라 중립 회색으로 따로 보인다
     QColor stepIncrease;
     QColor stepDecrease;
+
+    // 크기 눈금(히트맵 칸 색, 낮음 → 높음): 한 색조의 밝음 → 어두움(어두운 테마는 거꾸로, 낮은 값이 바탕 쪽)
+    QVector<QColor> vecSequentialRamp;
+    // 채움(히트맵 칸 · 도넛 조각) 위 글자: 둘 중 채움과 대비가 큰 쪽을 쓴다(GetFillTextColor). 검정 · 흰색이면 어떤 채움에서도 4.5:1 이상이다
+    QColor fillTextDark;
+    QColor fillTextLight;
 
     // 글꼴. 비우면 위젯 글꼴을 쓴다. 크기는 화면 점(px) 단위(확대 1배)
     QString strFontFamily;

@@ -23,35 +23,18 @@ constexpr double kNeutralSaturation = 0.15;      // 이 채도 아래면 회색 
 constexpr double kDistinctColorDistance = 80;    // RGB 거리가 이만큼 넘으면 눈으로 갈린다
 constexpr int kContrastDecimals = 2;             // 실패 글에 쓰는 대비의 소수 자리
 
-// WCAG 2 상대 휘도(sRGB): 채널 값 → 선형 값 → 휘도. 대비는 (밝은 휘도 + 0.05) / (어두운 휘도 + 0.05)
-constexpr double kChannelMax = 255.0;
-constexpr double kLinearThreshold = 0.04045;
-constexpr double kLinearSlope = 12.92;
-constexpr double kGammaOffset = 0.055;
-constexpr double kGammaScale = 1.055;
-constexpr double kGamma = 2.4;
-constexpr double kRedWeight = 0.2126;
-constexpr double kGreenWeight = 0.7152;
-constexpr double kBlueWeight = 0.0722;
-constexpr double kContrastOffset = 0.05;
+// 크기 눈금(design/MoreViews.md §4.4): 밝은 테마는 파랑 100 → 700(낮음 → 높음), 어두운 테마는 같은 색을 거꾸로. 채움 위 글자는 검정 · 흰색
+const QStringList kLightSequentialRamp { "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b" };
+constexpr const char* kFillTextDark = "#000000";
+constexpr const char* kFillTextLight = "#ffffff";
+constexpr int kRampSamples = 101;                // 눈금을 고르게 나눈 자리(0, 0.01, …, 1)
+constexpr double kRampMiddle = 0.5;              // 눈금 7개의 가운데(넷째 색)
+constexpr double kStepMiddle = 0.5;              // 이웃한 두 색 사이의 가운데(한 칸의 반)
+constexpr double kMixTolerance = 0.5;            // 섞은 채널 값의 반올림 오차
 
-double ToLinear(int channel)
-{
-    const double dValue = channel / kChannelMax;
-    return dValue <= kLinearThreshold ? dValue / kLinearSlope : std::pow((dValue + kGammaOffset) / kGammaScale, kGamma);
-}
-
-double GetLuminance(const QColor& color)
-{
-    return kRedWeight * ToLinear(color.red()) + kGreenWeight * ToLinear(color.green()) + kBlueWeight * ToLinear(color.blue());
-}
-
-double GetContrast(const QColor& a, const QColor& b)
-{
-    const double dLighter = std::max(GetLuminance(a), GetLuminance(b));
-    const double dDarker = std::min(GetLuminance(a), GetLuminance(b));
-    return (dLighter + kContrastOffset) / (dDarker + kContrastOffset);
-}
+// WCAG 2 휘도 · 대비(차트 시험과 함께 쓴다)
+using ViewTestSupport::GetContrast;
+using ViewTestSupport::GetLuminance;
 
 QString Describe(const QString& what, const QColor& a, const QColor& b)
 {
@@ -61,6 +44,15 @@ QString Describe(const QString& what, const QColor& a, const QColor& b)
 VisualMarkdownTheme MakeTheme(bool dark)
 {
     return dark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+}
+
+// 크기 눈금을 고르게 나눈 자리의 색(위젯이 칸을 칠하는 것과 같은 보간)
+QVector<QColor> SampleRamp(const VisualMarkdownTheme& theme)
+{
+    QVector<QColor> vecColors;
+    for (int iSample = 0; iSample < kRampSamples; ++iSample)
+        vecColors << theme.GetRampColor(static_cast<double>(iSample) / (kRampSamples - 1));
+    return vecColors;
 }
 }
 
@@ -192,6 +184,76 @@ private slots:
         }
     }
 
+    // 크기 눈금(히트맵 칸): 밝은 테마는 파랑 100 → 700, 어두운 테마는 같은 색을 거꾸로(낮은 값이 어두운 바탕 쪽으로 물러난다).
+    // 눈금 끝 · 가운데는 그 색 그대로이고, 범위 밖 자리는 끝 색이다. 채움 위 글자는 검정 · 흰색이다
+    void sequentialRampMatchesDesign_data() { themes_data(); }
+    void sequentialRampMatchesDesign()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = MakeTheme(dark);
+        QStringList vecExpected = kLightSequentialRamp;
+        if (dark)
+            std::reverse(vecExpected.begin(), vecExpected.end());
+        QStringList vecActual;
+        for (const QColor& color : theme.vecSequentialRamp)
+            vecActual << color.name();
+        QCOMPARE(vecActual, vecExpected);
+        QCOMPARE(theme.fillTextDark, QColor(QString::fromLatin1(kFillTextDark)));
+        QCOMPARE(theme.fillTextLight, QColor(QString::fromLatin1(kFillTextLight)));
+
+        QCOMPARE(theme.GetRampColor(0).name(), vecExpected.first());
+        QCOMPARE(theme.GetRampColor(1).name(), vecExpected.last());
+        QCOMPARE(theme.GetRampColor(kRampMiddle).name(), vecExpected[vecExpected.size() / 2]);
+        QCOMPARE(theme.GetRampColor(-1).name(), vecExpected.first());
+        QCOMPARE(theme.GetRampColor(2).name(), vecExpected.last());
+        // 이웃한 두 색 사이는 선형으로 섞는다: 첫 두 색의 가운데 자리는 두 색의 가운데 색이다
+        const double dHalfStep = kStepMiddle / (vecExpected.size() - 1);
+        const QColor first(vecExpected[0]);
+        const QColor second(vecExpected[1]);
+        const QColor middle = theme.GetRampColor(dHalfStep);
+        QVERIFY2(std::abs(middle.red() - (first.red() + second.red()) / 2.0) <= kMixTolerance
+                     && std::abs(middle.green() - (first.green() + second.green()) / 2.0) <= kMixTolerance
+                     && std::abs(middle.blue() - (first.blue() + second.blue()) / 2.0) <= kMixTolerance,
+                 qUtf8Printable(middle.name()));
+    }
+
+    // 채움(히트맵 칸 · 계열 색 8개) 위 글자: fillTextDark · fillTextLight 가운데 대비가 큰 쪽을 고르고, 어떤 채움에서도 4.5:1 이상이다
+    void fillTextIsReadableOnFills_data() { themes_data(); }
+    void fillTextIsReadableOnFills()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = MakeTheme(dark);
+        QVector<QColor> vecFills = SampleRamp(theme);
+        vecFills << theme.vecSeriesColors;
+        QCOMPARE(vecFills.size(), kRampSamples + kSeriesCount);
+        for (const QColor& fill : vecFills)
+        {
+            const QColor chosen = theme.GetFillTextColor(fill);
+            QVERIFY2(chosen == theme.fillTextDark || chosen == theme.fillTextLight, qUtf8Printable(fill.name() + QStringLiteral(" → ") + chosen.name()));
+            const QColor other = chosen == theme.fillTextDark ? theme.fillTextLight : theme.fillTextDark;
+            QVERIFY2(GetContrast(chosen, fill) >= GetContrast(other, fill), qUtf8Printable(Describe("chosen", chosen, fill)));
+            QVERIFY2(GetContrast(chosen, fill) >= kTextContrast, qUtf8Printable(Describe("fill text", chosen, fill)));
+        }
+    }
+
+    // 눈금의 밝기가 한쪽으로 고르게 바뀐다: 밝은 테마는 높은 값일수록 어두워지고, 어두운 테마는 밝아진다
+    void sequentialRampIsMonotonic_data() { themes_data(); }
+    void sequentialRampIsMonotonic()
+    {
+        QFETCH(bool, dark);
+        const VisualMarkdownTheme theme = MakeTheme(dark);
+        const QVector<QColor> vecSamples = SampleRamp(theme);
+        for (int iSample = 1; iSample < vecSamples.size(); ++iSample)
+        {
+            const double dBefore = GetLuminance(vecSamples[iSample - 1]);
+            const double dAfter = GetLuminance(vecSamples[iSample]);
+            QVERIFY2(dark ? dAfter > dBefore : dAfter < dBefore,
+                     qUtf8Printable(QStringLiteral("%1: %2 → %3").arg(iSample).arg(vecSamples[iSample - 1].name(), vecSamples[iSample].name())));
+        }
+        // 낮은 값은 바탕 쪽이다: 낮은 끝이 높은 끝보다 바탕과 덜 대비된다
+        QVERIFY(GetContrast(vecSamples.first(), theme.background) < GetContrast(vecSamples.last(), theme.background));
+    }
+
     // 기본 생성한 테마의 색이 아닌 값(AI 제안 흐림 · 점선 무늬 · 흐린 불투명도 · 글꼴 크기)은 내장 테마와 같다.
     // 색은 비어 있다(쓰는 쪽은 내장 테마에서 시작해 바꾼다)
     void defaultConstructedMatchesBuiltIn_data() { themes_data(); }
@@ -211,6 +273,9 @@ private slots:
         QCOMPARE(defaults.strFontFamily, builtIn.strFontFamily);
         QVERIFY(!defaults.background.isValid());
         QVERIFY(defaults.vecSeriesColors.isEmpty());
+        QVERIFY(defaults.vecSequentialRamp.isEmpty());
+        QVERIFY(!defaults.fillTextDark.isValid());
+        QVERIFY(!defaults.fillTextLight.isValid());
     }
 
     // 두 테마는 바탕이 다르고 글자 색이 뒤바뀐다(밝은 바탕에 어두운 글자, 어두운 바탕에 밝은 글자)

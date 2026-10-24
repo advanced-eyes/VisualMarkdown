@@ -235,55 +235,82 @@ QVector<ChartRow> PlaceOnNumbers(const KnowledgeTable& table, const ChartColumns
     return vecRows;
 }
 
-void BuildSeries(const KnowledgeTable& table, const ChartColumns& columns, const QVector<ChartRow>& rows, ChartSpec* spec)
+QStringList ListSeriesGroups(const KnowledgeTable& table, const ChartColumns& columns)
+{
+    if (columns.iSeries < 0)
+        return { QString() };
+    QStringList vecGroups;
+    for (int iRow = 0; iRow < table.vecRows.size(); ++iRow)
+    {
+        const QString strGroup = GetCell(table, iRow, columns.iSeries);
+        if (!strGroup.isEmpty() && !vecGroups.contains(strGroup))
+            vecGroups << strGroup;
+    }
+    return vecGroups;
+}
+
+int CountSeries(const KnowledgeTable& table, const ChartColumns& columns)
+{
+    return columns.vecY.size() * ListSeriesGroups(table, columns).size();
+}
+
+QString MakeSeriesName(const KnowledgeTable& table, const ChartColumns& columns, int yColumn, const QString& group)
+{
+    const QString& strY = table.vecColumns[yColumn].strName;
+    if (columns.iSeries < 0)
+        return strY;
+    return columns.vecY.size() > 1 ? strY + kJoin + group : group;
+}
+
+void BuildSeries(const KnowledgeTable& table, const ChartColumns& columns, const QVector<ChartRow>& rows, ChartSpec* spec, EYAxisGrouping grouping)
 {
     // series 값: 빈 칸이 아닌 글, 처음 나온 순서. series 열이 없으면 y 마다 계열 하나
-    QStringList vecGroups;
-    if (columns.iSeries >= 0)
-    {
-        for (int iRow = 0; iRow < table.vecRows.size(); ++iRow)
-        {
-            const QString strGroup = GetCell(table, iRow, columns.iSeries);
-            if (!strGroup.isEmpty() && !vecGroups.contains(strGroup))
-                vecGroups << strGroup;
-        }
-    }
-    else
-        vecGroups << QString();
+    const QStringList vecGroups = ListSeriesGroups(table, columns);
 
-    // y 단위마다 축(빈 단위도 단위 하나). 첫 단위는 왼쪽, 둘째부터는 오른쪽이다
+    // BY_UNIT: y 단위마다 축(빈 단위도 단위 하나). 첫 단위는 왼쪽, 둘째부터는 오른쪽이다
+    // BY_COLUMN: y 열마다 축 하나(이름 · 단위는 그 열)
     QStringList vecUnits;
     for (const int iY : columns.vecY)
         if (!vecUnits.contains(table.vecColumns[iY].strUnit))
             vecUnits << table.vecColumns[iY].strUnit;
-    for (int iAxis = 0; iAxis < std::min(vecUnits.size(), kMaxYAxes); ++iAxis)
+    if (grouping == EYAxisGrouping::BY_COLUMN)
     {
-        ChartAxis axis;
-        axis.strUnit = vecUnits[iAxis];
-        QStringList vecNames;
         for (const int iY : columns.vecY)
-            if (table.vecColumns[iY].strUnit == axis.strUnit)
-                vecNames << table.vecColumns[iY].strName;
-        axis.strTitle = vecNames.join(kJoin);
-        spec->vecYAxes << axis;
+        {
+            ChartAxis axis;
+            axis.strTitle = table.vecColumns[iY].strName;
+            axis.strUnit = table.vecColumns[iY].strUnit;
+            spec->vecYAxes << axis;
+        }
+    }
+    else
+    {
+        for (int iAxis = 0; iAxis < std::min(vecUnits.size(), kMaxYAxes); ++iAxis)
+        {
+            ChartAxis axis;
+            axis.strUnit = vecUnits[iAxis];
+            QStringList vecNames;
+            for (const int iY : columns.vecY)
+                if (table.vecColumns[iY].strUnit == axis.strUnit)
+                    vecNames << table.vecColumns[iY].strName;
+            axis.strTitle = vecNames.join(kJoin);
+            spec->vecYAxes << axis;
+        }
     }
 
-    const bool bSeveralY = columns.vecY.size() > 1;
-    for (const int iY : columns.vecY)
+    for (int iYIndex = 0; iYIndex < columns.vecY.size(); ++iYIndex)
     {
+        const int iY = columns.vecY[iYIndex];
         const KnowledgeColumn& yColumn = table.vecColumns[iY];
         const int iUnit = vecUnits.indexOf(yColumn.strUnit);
-        if (iUnit >= kMaxYAxes)
+        if (grouping == EYAxisGrouping::BY_UNIT && iUnit >= kMaxYAxes)
             spec->vecWarnings << QStringLiteral("y 열 \"%1\"(단위 \"%2\"): 셋째 이후 단위라 오른쪽 축에 둔다").arg(yColumn.strName, yColumn.strUnit);
         for (const QString& strGroup : vecGroups)
         {
             ChartSeries series;
-            if (columns.iSeries < 0)
-                series.strName = yColumn.strName;
-            else
-                series.strName = bSeveralY ? yColumn.strName + kJoin + strGroup : strGroup;
+            series.strName = MakeSeriesName(table, columns, iY, strGroup);
             series.strUnit = yColumn.strUnit;
-            series.iAxis = std::min(iUnit, kRightAxis);
+            series.iAxis = grouping == EYAxisGrouping::BY_COLUMN ? iYIndex : std::min(iUnit, kRightAxis);
             for (const ChartRow& row : rows)
             {
                 if (columns.iSeries >= 0 && GetCell(table, row.iRow, columns.iSeries) != strGroup)

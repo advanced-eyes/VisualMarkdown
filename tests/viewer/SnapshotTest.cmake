@@ -42,7 +42,7 @@ function(visualmarkdown_png_size path outSize)
     set(${outSize} "${width}x${height}" PARENT_SCOPE)
 endfunction()
 
-# 스냅샷 폴더를 확인한다: PNG 가 기대 목록의 파일 18개 그대로이고, 그림 크기가 size 이며, snapshot.tsv 가 기대 파일과 바이트로 같다
+# 스냅샷 폴더를 확인한다: PNG 가 기대 목록의 파일 19개 그대로이고, 그림 크기가 size 이며, snapshot.tsv 가 기대 파일과 바이트로 같다
 function(visualmarkdown_check_snapshot caseName folder size)
     file(STRINGS "${EXPECTED_TSV}" expectedLines ENCODING UTF-8)
     list(REMOVE_AT expectedLines 0)   # 머리 줄
@@ -56,7 +56,7 @@ function(visualmarkdown_check_snapshot caseName folder size)
     file(GLOB pngs "${folder}/*.png")
     list(LENGTH pngs pngCount)
     set(passed FALSE)
-    if(pngCount EQUAL 18 AND NOT missing)
+    if(pngCount EQUAL 19 AND NOT missing)
         set(passed TRUE)
     endif()
     visualmarkdown_report("${caseName}.files" ${passed} "${pngCount} PNG, missing: ${missing}")
@@ -99,7 +99,7 @@ endfunction()
 file(REMOVE_RECURSE "${OUTPUT_DIR}")
 file(MAKE_DIRECTORY "${OUTPUT_DIR}")
 
-# 1) showcase(기본: light · 1600x1000): 끝 코드 0, PNG 18개(그래프 6 + 차트 12), snapshot.tsv 가 기대 파일과 바이트로 같다
+# 1) showcase(기본: light · 1600x1000): 끝 코드 0, PNG 19개(그래프 6 + 차트 13), snapshot.tsv 가 기대 파일과 바이트로 같다
 set(lightDir "${OUTPUT_DIR}/light")
 visualmarkdown_run(exitCode log "${WIKI_DIR}" --snapshot "${lightDir}")
 set(passed FALSE)
