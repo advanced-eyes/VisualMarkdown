@@ -26,6 +26,7 @@ constexpr int kNetworkSeparationPasses = 500;                       // 겹친 �
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kMinDistance = 0.01;      // 두 점이 이보다 가까우면 정한 방향(x)으로 민다(0 으로 나누지 않게)
 constexpr double kSeparationSlack = 0.5;   // 겹친 상자를 뗄 때 더 떼는 거리(부동소수 오차로 다시 겹치지 않게)
+constexpr double kColumnSlack = 1e-6;      // 열 높이 상한과 견줄 때의 여유(딱 맞는 상자가 부동소수 오차로 밀려나지 않게)
 
 using NodePair = QPair<int, int>;          // 덩어리 안 자리(작은 것, 큰 것)
 
@@ -200,36 +201,121 @@ bool NetworkLayoutCPU::Execute(const GraphLayoutInput& in, GraphLayoutOutput& ou
         vecComponentPairs.erase(std::unique(vecComponentPairs.begin(), vecComponentPairs.end()), vecComponentPairs.end());
     }
 
-    // 덩어리를 큰 것부터 왼쪽에서 오른쪽으로(상자 위를 0 에 맞춘다). 선 없는 점(크기 1)은 그 뒤에 한 줄로
-    QVector<QPointF> vecCenters(vecNodes.size(), QPointF(0, 0));
-    double dCursor = 0;
+    // 이어진 덩어리(점 2개 이상)마다 힘 배치 · 상자 밀기를 하고 덩어리 상자(점 상자를 모두 담는 사각형, 덩어리 안 자리 기준)를 잰다
+    QVector<QVector<QPointF>> vecLocalPositions(vecComponents.size());
+    QVector<QRectF> vecLocalBoxes(vecComponents.size());
+    QVector<int> vecSingles;   // 선 없는 점(크기 1 덩어리)의 점 번호, 덩어리 순(= 이름 열쇠 순)
+    double dColumnLimit = 0;   // 열 높이 상한 H
     for (int iComponent = 0; iComponent < vecComponents.size(); ++iComponent)
     {
         const QVector<int>& vecComponent = vecComponents[iComponent];
         if (vecComponent.size() < 2)
+        {
+            vecSingles.push_back(vecComponent.first());
             continue;
+        }
         QVector<QPointF> vecPositions = RunForceLayout(graph, vecComponent, vecPairs[iComponent]);
         SeparateBoxes(vecPositions);
         double dLeft = std::numeric_limits<double>::max();
         double dTop = std::numeric_limits<double>::max();
         double dRight = std::numeric_limits<double>::lowest();
+        double dBottom = std::numeric_limits<double>::lowest();
         for (const QPointF& ptPosition : vecPositions)
         {
             dLeft = std::min(dLeft, ptPosition.x() - kNodeWidth / 2);
             dTop = std::min(dTop, ptPosition.y() - kNodeHeight / 2);
             dRight = std::max(dRight, ptPosition.x() + kNodeWidth / 2);
+            dBottom = std::max(dBottom, ptPosition.y() + kNodeHeight / 2);
         }
-        const QPointF ptShift(dCursor - dLeft, -dTop);
-        for (int iLocal = 0; iLocal < vecComponent.size(); ++iLocal)
-            vecCenters[vecComponent[iLocal]] = vecPositions[iLocal] + ptShift;
-        dCursor += dRight - dLeft + kComponentGap;
+        vecLocalPositions[iComponent] = vecPositions;
+        vecLocalBoxes[iComponent] = QRectF(QPointF(dLeft, dTop), QPointF(dRight, dBottom));
+        dColumnLimit = std::max(dColumnLimit, dBottom - dTop);
     }
-    for (const QVector<int>& vecComponent : vecComponents)
+
+    // 덩어리 상자를 세로 열로 쌓는다(design/Views.md §5 관계망). 정한 규칙:
+    // - 열 높이 상한 H 는 이어진 덩어리 상자 높이의 가장 큰 값이다. 이어진 덩어리가 없으면(점이 모두 선 없는 점) 줄 수 r = ⌈√점 수⌉ 인
+    //   격자 높이 r × kNodeHeight + (r − 1) × kNodeGapY 다.
+    // - 이어진 덩어리는 덩어리 순(큰 것부터, 같으면 이름 열쇠 순)으로 놓는다. 지금 열의 아래(틈 kComponentGap)에 넣어 열 높이가 H 를
+    //   넘지 않으면 거기에 두고, 넘으면 오른쪽에 새 열을 열어 그 맨 위에 둔다. 새 열의 x 는 지금까지 놓은 상자의 오른쪽 끝 + kComponentGap 이다.
+    //   상자 왼쪽은 열 왼쪽에 맞추고, 열 너비는 그 열 상자 너비의 가장 큰 값이다. 첫 열은 x = 0, 열 맨 위는 y = 0 이다.
+    // - 선 없는 점은 그 뒤에 덩어리 순으로 격자 줄에 놓는다(점 사이 kNodeGapX · kNodeGapY, 줄 안은 왼쪽 → 오른쪽, 줄은 위 → 아래).
+    //   지금 열에 덩어리가 있으면 그 아래(틈 kComponentGap)부터, 한 줄에 열 너비에 드는 만큼(최소 1)씩 줄 바닥이 H 를 넘지 않는 동안 채운다.
+    //   남은 점(또는 지금 열이 비었을 때 모든 점)은 오른쪽 새 열(x 는 위와 같다)의 맨 위부터 둔다. 새 열의 줄 수 R 은 H 에 드는 줄 수(최소 1),
+    //   한 줄의 점 수는 ⌈남은 점 / R⌉ 이다. 그래서 선 없는 점만 9개면 3 × 3 격자다.
+    // 덩어리 안 점끼리의 상대 자리는 바꾸지 않는다(덩어리마다 평행 이동만). 정한 값과 정한 순서만 쓰므로 같은 입력이면 같은 출력이다.
+    const double dSlotPitch = kNodeWidth + kNodeGapX;
+    const double dRowPitch = kNodeHeight + kNodeGapY;
+    if (vecSingles.size() == vecComponents.size() && !vecSingles.isEmpty())
     {
-        if (vecComponent.size() != 1)
+        int iRows = 1;
+        while (iRows * iRows < vecSingles.size())
+            ++iRows;
+        dColumnLimit = iRows * kNodeHeight + (iRows - 1) * kNodeGapY;
+    }
+
+    QVector<QPointF> vecCenters(vecNodes.size(), QPointF(0, 0));
+    bool bColumnEmpty = true;   // 지금 열에 아직 아무것도 없다(이어진 덩어리가 하나도 없을 때만 끝까지 비었다)
+    double dColumnLeft = 0;
+    double dColumnWidth = 0;
+    double dColumnBottom = 0;
+    double dRightEnd = 0;       // 놓은 상자들의 오른쪽 끝
+    for (int iComponent = 0; iComponent < vecComponents.size(); ++iComponent)
+    {
+        const QVector<int>& vecComponent = vecComponents[iComponent];
+        if (vecComponent.size() < 2)
             continue;
-        vecCenters[vecComponent.first()] = QPointF(dCursor + kNodeWidth / 2, kNodeHeight / 2);
-        dCursor += kNodeWidth + kNodeGapX;
+        const QRectF& rectLocal = vecLocalBoxes[iComponent];
+        double dTop = 0;
+        if (!bColumnEmpty && dColumnBottom + kComponentGap + rectLocal.height() <= dColumnLimit + kColumnSlack)
+        {
+            dTop = dColumnBottom + kComponentGap;
+        }
+        else if (!bColumnEmpty)
+        {
+            dColumnLeft = dRightEnd + kComponentGap;
+            dColumnWidth = 0;
+        }
+        const QPointF ptShift(dColumnLeft - rectLocal.left(), dTop - rectLocal.top());
+        for (int iLocal = 0; iLocal < vecComponent.size(); ++iLocal)
+            vecCenters[vecComponent[iLocal]] = vecLocalPositions[iComponent][iLocal] + ptShift;
+        bColumnEmpty = false;
+        dColumnBottom = dTop + rectLocal.height();
+        dColumnWidth = std::max(dColumnWidth, rectLocal.width());
+        dRightEnd = std::max(dRightEnd, dColumnLeft + rectLocal.width());
+    }
+
+    int iNextSingle = 0;
+    if (!bColumnEmpty)
+    {
+        // 지금 열의 남은 높이: 열 너비에 드는 만큼씩 줄을 채운다
+        const int iPerRow = std::max(1, static_cast<int>(std::floor((dColumnWidth + kNodeGapX) / dSlotPitch)));
+        double dRowTop = dColumnBottom + kComponentGap;
+        while (iNextSingle < vecSingles.size() && dRowTop + kNodeHeight <= dColumnLimit + kColumnSlack)
+        {
+            for (int iSlot = 0; iSlot < iPerRow && iNextSingle < vecSingles.size(); ++iSlot, ++iNextSingle)
+            {
+                const double dLeft = dColumnLeft + iSlot * dSlotPitch;
+                vecCenters[vecSingles[iNextSingle]] = QPointF(dLeft + kNodeWidth / 2, dRowTop + kNodeHeight / 2);
+                dRightEnd = std::max(dRightEnd, dLeft + kNodeWidth);
+            }
+            dRowTop += dRowPitch;
+        }
+    }
+    if (iNextSingle < vecSingles.size())
+    {
+        // 남은 점: 오른쪽 새 열. 줄 수는 H 에 드는 만큼, 한 줄은 남은 점을 그 줄 수로 고르게 나눈 만큼
+        const double dLeft = bColumnEmpty ? 0 : dRightEnd + kComponentGap;
+        int iRows = 1;
+        while (iRows * dRowPitch + kNodeHeight <= dColumnLimit + kColumnSlack)
+            ++iRows;
+        const int iRemaining = vecSingles.size() - iNextSingle;
+        const int iPerRow = (iRemaining + iRows - 1) / iRows;
+        for (int iIndex = 0; iIndex < iRemaining; ++iIndex)
+        {
+            const double dX = dLeft + (iIndex % iPerRow) * dSlotPitch + kNodeWidth / 2;
+            const double dY = (iIndex / iPerRow) * dRowPitch + kNodeHeight / 2;
+            vecCenters[vecSingles[iNextSingle + iIndex]] = QPointF(dX, dY);
+        }
     }
 
     for (int iNode = 0; iNode < vecNodes.size(); ++iNode)

@@ -40,10 +40,19 @@ constexpr int kEdgeCount = 36;
 constexpr int kUndirectedEdgeCount = 5;
 const QList<int> kComponentSizes { 19, 8, 1, 1, 1, 1 };
 const QStringList kSingleComponents { "coco", "pascal-voc", "승인율", "응답-시간" };   // 크기 1 덩어리(선 없는 점), 이름 열쇠 순
+constexpr int kResearchComponent = 0;   // 연구 덩어리(19점, 검출기가 든 것)
+constexpr int kPlanningComponent = 1;   // 기획서 덩어리(8점, 결제 서비스가 든 것)
 const QVector<NameCount> kEdgeCounts { { "1단계-검출기", 6 }, { "검출기", 3 }, { "faster-r-cnn", 6 }, { "coco", 0 } };
 const QStringList kDocumentTitles { kPaymentTitle, kFocalLossTitle, kTwoStageTitle, kYolov3Title, kYolo9000Title, kYoloTitle };   // learned 늦은 것부터
 constexpr const char* kHiddenConcept = "dpm";          // 아무도 가리키지 않아 숨는다(연도 2008)
 constexpr const char* kMissingConcept = "darknet-53";  // YOLOv3 문서가 가리키지만 개념 파일이 없다
+
+// 관계망 배치 범위. 고치기 전(049ba54: 덩어리를 큰 것부터 한 줄로 늘어놓고 선 없는 점을 끝에 한 줄로 두던 때) 잰 값은
+// 2140.056878 × 981.601564 = 넓이 2100683.18(가로:세로 2.18)이었다. 덩어리를 세로 열로 쌓아 넓이를 그 75% 이하,
+// 가로를 세로의 1.7배 이하로 줄인다(design/Views.md §5 관계망 줄).
+constexpr double kNetworkAreaBefore = 2100683.18;
+constexpr double kNetworkMaxAreaShare = 0.75;
+constexpr double kNetworkMaxAspect = 1.7;
 
 // 문서 ↔ 개념: 문서마다 연결 수(개념 파일이 없는 Darknet-53 은 뺀다)와 무게 합(카드 링크 + 관계 끝 + 표 concepts)
 struct DocumentLinks
@@ -145,6 +154,14 @@ constexpr int kDenseLeafCount = 40;
 constexpr int kDenseCliqueSize = 7;
 constexpr int kLeafNumberWidth = 2;   // 잎 id 의 번호 자리 수(leaf-00)
 constexpr int kDecimalBase = 10;
+
+// 열 쌓기 합성 그래프: 별(중심 하나에 잎 6)이 가장 큰 덩어리, 그 뒤에 두 점 덩어리 7개 또는 두 점 덩어리 하나와 선 없는 점 14개
+constexpr int kStarLeafCount = 6;
+constexpr int kSmallPairCount = 7;
+constexpr int kOverflowSingleCount = 14;
+// 열 높이 상한 합성 그래프: 서로 다 이어진 다섯 점(A1 …)과 점 수가 같은 사슬(B1 – … – B5, 더 높다), 그 뒤에 두 점 덩어리 6개
+constexpr int kLimitGroupSize = 5;
+constexpr int kLimitPairCount = 6;
 
 // ================================================================================================
 
@@ -375,6 +392,110 @@ QString DescribePoint(const QString& id, const QPointF& point)
     return id + QStringLiteral(" (") + FormatNumber(point.x()) + QStringLiteral(", ") + FormatNumber(point.y()) + QLatin1Char(')');
 }
 
+QString DescribeBox(const QRectF& box)
+{
+    return QStringLiteral("(%1, %2 %3 x %4)").arg(box.x()).arg(box.y()).arg(box.width()).arg(box.height());
+}
+
+bool IsNear(double first, double second)
+{
+    return qAbs(first - second) < kTolerance;
+}
+
+// 관계망: 덩어리마다 점 상자를 모두 담는 사각형(GetComponents 순). 관계망 출력의 점 자리는 그래프 점 번호와 같다
+QVector<QRectF> ListComponentBoxes(const KnowledgeGraph& graph, const GraphLayoutOutput& out)
+{
+    QVector<QRectF> vecBoxes;
+    for (const QVector<int>& vecComponent : graph.GetComponents())
+    {
+        QRectF rectBox;
+        for (const int iNode : vecComponent)
+            rectBox = rectBox.isNull() ? MakeBox(out.vecNodes[iNode]) : rectBox.united(MakeBox(out.vecNodes[iNode]));
+        vecBoxes << rectBox;
+    }
+    return vecBoxes;
+}
+
+// 관계망 열 높이 상한 H: 이어진 덩어리(점 2개 이상) 상자 높이의 가장 큰 값. 이어진 덩어리가 없으면 0
+double GetColumnLimit(const KnowledgeGraph& graph, const GraphLayoutOutput& out)
+{
+    const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+    double dLimit = 0;
+    for (int iComponent = 0; iComponent < vecBoxes.size(); ++iComponent)
+        if (graph.GetComponents()[iComponent].size() > 1)
+            dLimit = qMax(dLimit, vecBoxes[iComponent].height());
+    return dLimit;
+}
+
+// 관계망: 이어진 덩어리가 세로 열로 쌓였는지 본다(design/Views.md §5). 맞으면 빈 글, 아니면 처음 어긋난 덩어리.
+// 덩어리 순서대로 첫 덩어리는 배치 범위의 왼쪽 위. 다음 덩어리는 지금 열 아래(틈 kComponentGap)에 넣어 열 높이가 H 를
+// 넘지 않으면 거기(상자 왼쪽을 열 왼쪽에 맞춘다), 넘으면 오른쪽 새 열(앞 상자들의 오른쪽 끝 + kComponentGap)의 맨 위다
+QString CheckComponentColumns(const KnowledgeGraph& graph, const GraphLayoutOutput& out)
+{
+    const QVector<QVector<int>>& vecComponents = graph.GetComponents();
+    const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+    const double dLimit = GetColumnLimit(graph, out);
+    const double dTop = out.bounds.top();
+    bool bFirst = true;
+    double dColumnLeft = 0;
+    double dColumnBottom = 0;
+    double dRightEnd = 0;   // 놓은 상자들의 오른쪽 끝
+    for (int iComponent = 0; iComponent < vecComponents.size(); ++iComponent)
+    {
+        if (vecComponents[iComponent].size() < 2)
+            continue;
+        const QRectF& rectBox = vecBoxes[iComponent];
+        const QString strWhere = QStringLiteral("component %1 %2").arg(iComponent).arg(DescribeBox(rectBox));
+        if (bFirst)
+        {
+            if (!IsNear(rectBox.left(), out.bounds.left()) || !IsNear(rectBox.top(), dTop))
+                return strWhere + QStringLiteral(" is not at the top left of ") + DescribeBox(out.bounds);
+            dColumnLeft = rectBox.left();
+            dRightEnd = rectBox.right();
+            bFirst = false;
+        }
+        else if (dColumnBottom + GraphLayoutSize::kComponentGap + rectBox.height() <= dTop + dLimit + kTolerance)
+        {
+            if (!IsNear(rectBox.left(), dColumnLeft) || !IsNear(rectBox.top(), dColumnBottom + GraphLayoutSize::kComponentGap))
+                return strWhere + QStringLiteral(" fits below its column (bottom %1) but is not there").arg(dColumnBottom);
+        }
+        else
+        {
+            if (!IsNear(rectBox.left(), dRightEnd + GraphLayoutSize::kComponentGap) || !IsNear(rectBox.top(), dTop))
+                return strWhere + QStringLiteral(" does not fit below its column but is not at the top of a new column (right end %1)").arg(dRightEnd);
+            dColumnLeft = rectBox.left();
+        }
+        if (rectBox.bottom() > dTop + dLimit + kTolerance)
+            return strWhere + QStringLiteral(" goes below the column limit %1").arg(dLimit);
+        dColumnBottom = rectBox.bottom();
+        dRightEnd = qMax(dRightEnd, rectBox.right());
+    }
+    return QString();
+}
+
+// 관계망: kComponentGap 보다 가까운 덩어리 상자 쌍(없으면 빈 목록). 선 없는 점끼리는 점 틈만큼 떼므로 보지 않는다
+QStringList FindCloseComponents(const KnowledgeGraph& graph, const GraphLayoutOutput& out)
+{
+    const QVector<QVector<int>>& vecComponents = graph.GetComponents();
+    const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+    QStringList vecPairs;
+    for (int iFirst = 0; iFirst < vecBoxes.size(); ++iFirst)
+    {
+        for (int iSecond = iFirst + 1; iSecond < vecBoxes.size(); ++iSecond)
+        {
+            if (vecComponents[iFirst].size() == 1 && vecComponents[iSecond].size() == 1)
+                continue;
+            const QRectF& rectFirst = vecBoxes[iFirst];
+            const QRectF& rectSecond = vecBoxes[iSecond];
+            const double dGapX = qMax(rectSecond.left() - rectFirst.right(), rectFirst.left() - rectSecond.right());
+            const double dGapY = qMax(rectSecond.top() - rectFirst.bottom(), rectFirst.top() - rectSecond.bottom());
+            if (qMax(dGapX, dGapY) < GraphLayoutSize::kComponentGap - kTolerance)
+                vecPairs << QStringLiteral("%1 %2 / %3 %4").arg(iFirst).arg(DescribeBox(rectFirst)).arg(iSecond).arg(DescribeBox(rectSecond));
+        }
+    }
+    return vecPairs;
+}
+
 // 합성 그래프용 기록
 KnowledgeConcept MakeConcept(const QString& id, const QString& name, const QString& year = QString())
 {
@@ -400,6 +521,79 @@ KnowledgeEdge MakeEdge(const QString& from, const QString& kind, const QString& 
 ConceptLink MakeLink(const QString& conceptId)
 {
     return { conceptId, conceptId };
+}
+
+// 열 쌓기 합성 그래프의 별: 중심 hub(A Hub)에 잎 leaf1 … 이 isA 로 닿는다. 이름이 A 로 시작해 다른 점보다 이름 열쇠가 앞선다
+void AddStar(QVector<KnowledgeConcept>* concepts, QVector<KnowledgeEdge>* edges)
+{
+    *concepts << MakeConcept("hub", "A Hub");
+    for (int iLeaf = 1; iLeaf <= kStarLeafCount; ++iLeaf)
+    {
+        const QString strId = QStringLiteral("leaf%1").arg(iLeaf);
+        *concepts << MakeConcept(strId, QStringLiteral("A Leaf %1").arg(iLeaf));
+        *edges << MakeEdge(strId, "isA", "hub");
+    }
+}
+
+// 두 점 덩어리: p<n>a uses p<n>b(이름 P<n> A · P<n> B)
+void AddPair(int number, QVector<KnowledgeConcept>* concepts, QVector<KnowledgeEdge>* edges)
+{
+    const QString strFirst = QStringLiteral("p%1a").arg(number);
+    const QString strSecond = QStringLiteral("p%1b").arg(number);
+    *concepts << MakeConcept(strFirst, QStringLiteral("P%1 A").arg(number)) << MakeConcept(strSecond, QStringLiteral("P%1 B").arg(number));
+    *edges << MakeEdge(strFirst, "uses", strSecond);
+}
+
+// 선 없는 점: s01 …(이름 S01 …)
+void AddSingles(int count, QVector<KnowledgeConcept>* concepts)
+{
+    for (int iSingle = 1; iSingle <= count; ++iSingle)
+    {
+        const QString strId = QStringLiteral("s%1").arg(iSingle, kLeafNumberWidth, kDecimalBase, QLatin1Char('0'));
+        *concepts << MakeConcept(strId, strId.toUpper());
+    }
+}
+
+// 관계망에서 이어진 덩어리마다, 그 덩어리의 개념 · 선만으로 따로 배치한 것과 점끼리의 상대 자리가 같은지 본다. 같으면 빈 글
+QString CompareComponentShapes(const KnowledgeGraph& graph, const QVector<KnowledgeConcept>& concepts, const QVector<KnowledgeEdge>& edges)
+{
+    GraphLayoutOutput out;
+    if (!RunLayout(graph, EGraphLayoutType::NETWORK, &out))
+        return QStringLiteral("layout failed");
+    int iCompared = 0;
+    for (const QVector<int>& vecComponent : graph.GetComponents())
+    {
+        if (vecComponent.size() < 2)
+            continue;
+        QSet<QString> setIds;
+        for (const int iNode : vecComponent)
+            setIds.insert(graph.GetNodes()[iNode].strId);
+        QVector<KnowledgeConcept> vecPartConcepts;
+        for (const KnowledgeConcept& concept : concepts)
+            if (setIds.contains(concept.strId))
+                vecPartConcepts << concept;
+        QVector<KnowledgeEdge> vecPartEdges;
+        for (const KnowledgeEdge& edge : edges)
+            if (setIds.contains(edge.strFromId) && setIds.contains(edge.strToId))
+                vecPartEdges << edge;
+        const QString strAnchor = graph.GetNodes()[vecComponent.first()].strId;
+        const KnowledgeGraph part = KnowledgeGraph::BuildFromParts(vecPartConcepts, vecPartEdges, {});
+        GraphLayoutOutput partOut;
+        if (part.GetNodes().size() != vecComponent.size() || part.GetComponents().size() != 1 || !RunLayout(part, EGraphLayoutType::NETWORK, &partOut))
+            return QStringLiteral("could not lay out the component of ") + strAnchor + QStringLiteral(" alone");
+        const QPointF ptAnchor = out.vecNodes[vecComponent.first()].center;
+        const QPointF ptPartAnchor = GetCenter(partOut, strAnchor);
+        for (const int iNode : vecComponent)
+        {
+            const QString strId = graph.GetNodes()[iNode].strId;
+            const QPointF ptOffset = out.vecNodes[iNode].center - ptAnchor;
+            const QPointF ptPartOffset = GetCenter(partOut, strId) - ptPartAnchor;
+            if (!IsNear(ptOffset.x(), ptPartOffset.x()) || !IsNear(ptOffset.y(), ptPartOffset.y()))
+                return DescribePoint(strId + QStringLiteral(" - ") + strAnchor, ptOffset) + QStringLiteral(" / alone ") + DescribePoint(strId, ptPartOffset);
+        }
+        ++iCompared;
+    }
+    return iCompared > 0 ? QString() : QStringLiteral("no component with an edge");
 }
 }
 
@@ -569,7 +763,7 @@ private slots:
             QVERIFY2(!setLinkedNodes.contains(m_graph.FindNode(strId)), qUtf8Printable(strId));
     }
 
-    // 관계망: 점 31 · 선 36. 점 상자끼리 · 덩어리 상자끼리 겹치지 않고, 덩어리는 큰 것부터 왼쪽에서 오른쪽, 선 없는 점은 끝에 한 줄
+    // 관계망: 점 31 · 선 36. 점 상자끼리 · 덩어리 상자끼리 겹치지 않고, 덩어리는 큰 것부터 차례로 앞 덩어리의 오른쪽이나 아래(열로 쌓는다)
     void networkShowsWholeGraph()
     {
         const GraphLayoutOutput& out = GetOutput(EGraphLayoutType::NETWORK);
@@ -590,16 +784,9 @@ private slots:
         const QStringList vecOverlaps = FindOverlaps(out);
         QVERIFY2(vecOverlaps.isEmpty(), qUtf8Printable(vecOverlaps.join(QStringLiteral(", "))));
 
-        // 덩어리 상자: 서로 겹치지 않고 덩어리 순으로 왼쪽에서 오른쪽
-        const QVector<QVector<int>>& vecComponents = m_graph.GetComponents();
-        QVector<QRectF> vecBoxes;
-        for (const QVector<int>& vecComponent : vecComponents)
-        {
-            QRectF rectBox;
-            for (const int iNode : vecComponent)
-                rectBox = rectBox.isNull() ? MakeBox(out.vecNodes[iNode]) : rectBox.united(MakeBox(out.vecNodes[iNode]));
-            vecBoxes << rectBox;
-        }
+        // 덩어리 상자: 서로 겹치지 않고, 덩어리 순으로 다음 덩어리는 앞 덩어리의 오른쪽이나 아래에 있다
+        // (예전에는 "왼쪽에서 오른쪽 한 줄 · 선 없는 점은 끝에 한 줄" 을 봤다. 열로 쌓는 배치로 바꾸며 이 두 검사를 고쳤다)
+        const QVector<QRectF> vecBoxes = ListComponentBoxes(m_graph, out);
         QCOMPARE(vecBoxes.size(), kComponentSizes.size());
         for (int iFirst = 0; iFirst < vecBoxes.size(); ++iFirst)
         {
@@ -607,18 +794,48 @@ private slots:
                 QVERIFY2(!vecBoxes[iFirst].intersects(vecBoxes[iSecond]),
                          qUtf8Printable(QStringLiteral("components %1 and %2 overlap").arg(iFirst).arg(iSecond)));
             if (iFirst > 0)
-                QVERIFY2(vecBoxes[iFirst - 1].right() < vecBoxes[iFirst].left(),
-                         qUtf8Printable(QStringLiteral("component %1 is not right of component %2").arg(iFirst).arg(iFirst - 1)));
+                QVERIFY2(vecBoxes[iFirst - 1].right() < vecBoxes[iFirst].left() || vecBoxes[iFirst - 1].bottom() < vecBoxes[iFirst].top(),
+                         qUtf8Printable(QStringLiteral("component %1 is neither right of nor below component %2").arg(iFirst).arg(iFirst - 1)));
         }
-        // 선 없는 점은 한 줄(같은 높이)
-        double dSingleY = qQNaN();
+        // 덩어리 상자끼리 kComponentGap 이상 떨어진다(선 없는 점끼리는 점 틈만큼)
+        const QStringList vecClose = FindCloseComponents(m_graph, out);
+        QVERIFY2(vecClose.isEmpty(), qUtf8Printable(vecClose.join(QStringLiteral(", "))));
+    }
+
+    // 관계망은 덩어리 상자를 세로 열로 쌓는다(design/Views.md §5 관계망 줄). showcase: 연구 덩어리 오른쪽 열의 맨 위에 기획서 덩어리,
+    // 그 아래 같은 열에 선 없는 점 4개가 격자로(한 줄이 아니다). 배치 범위는 가로 ≤ 1.7 × 세로, 넓이는 고치기 전의 75% 이하다
+    void networkStacksComponentsInColumns()
+    {
+        const GraphLayoutOutput& out = GetOutput(EGraphLayoutType::NETWORK);
+        const QString strBounds = DescribeBox(out.bounds);
+        QVERIFY2(out.bounds.width() <= kNetworkMaxAspect * out.bounds.height(), qUtf8Printable(strBounds));
+        QVERIFY2(out.bounds.width() * out.bounds.height() <= kNetworkMaxAreaShare * kNetworkAreaBefore,
+                 qUtf8Printable(strBounds + QStringLiteral(" area %1").arg(out.bounds.width() * out.bounds.height())));
+        const QString strColumns = CheckComponentColumns(m_graph, out);
+        QVERIFY2(strColumns.isEmpty(), qUtf8Printable(strColumns));
+
+        const QVector<QRectF> vecBoxes = ListComponentBoxes(m_graph, out);
+        const QRectF& rectResearch = vecBoxes[kResearchComponent];
+        const QRectF& rectPlanning = vecBoxes[kPlanningComponent];
+        QCOMPARE(m_graph.GetNodes()[m_graph.FindNode(DecodeUtf8("검출기"))].iComponent, kResearchComponent);
+        QCOMPARE(m_graph.GetNodes()[m_graph.FindNode(DecodeUtf8("결제-서비스"))].iComponent, kPlanningComponent);
+        const QString strPair = DescribeBox(rectResearch) + QStringLiteral(" / ") + DescribeBox(rectPlanning);
+        QVERIFY2(rectPlanning.left() >= rectResearch.right() + GraphLayoutSize::kComponentGap - kTolerance, qUtf8Printable(strPair));
+        QVERIFY2(IsNear(rectPlanning.top(), rectResearch.top()), qUtf8Printable(strPair));
+
+        QSet<double> setRowTops;
         for (const QString& strId : kSingleComponents)
         {
-            const QPointF ptCenter = GetCenter(out, strId);
-            if (std::isnan(dSingleY))
-                dSingleY = ptCenter.y();
-            QVERIFY2(qFuzzyCompare(ptCenter.y(), dSingleY), qUtf8Printable(DescribePoint(strId, ptCenter)));
+            const int iNode = FindLayoutNode(out, strId);
+            QVERIFY2(iNode >= 0, qUtf8Printable(strId));
+            const QRectF rectSingle = MakeBox(out.vecNodes[iNode]);
+            const QString strSingle = strId + QLatin1Char(' ') + DescribeBox(rectSingle) + QStringLiteral(" / planning ") + DescribeBox(rectPlanning);
+            QVERIFY2(rectSingle.top() >= rectPlanning.bottom() + GraphLayoutSize::kComponentGap - kTolerance, qUtf8Printable(strSingle));
+            QVERIFY2(rectSingle.left() >= rectPlanning.left() - kTolerance && rectSingle.right() <= rectPlanning.right() + kTolerance,
+                     qUtf8Printable(strSingle));
+            setRowTops.insert(rectSingle.top());
         }
+        QVERIFY2(setRowTops.size() > 1, "single nodes are not in one row");
     }
 
     // 계보도: improves 선과 그 끝(점 8 · 선 5), 갈래 3개. 갈래 안에서 옛것이 왼쪽이고 선마다 from(새것)이 to(옛것)보다 오른쪽
@@ -1144,6 +1361,216 @@ private slots:
         QVERIFY(qMax(GetCenter(out, "c").x(), GetCenter(out, "d").x()) < GetCenter(out, "b").x());
         QVERIFY(GetCenter(out, "b").x() < GetCenter(out, "a").x());
         QCOMPARE(GetCenter(out, "b").y(), GetCenter(out, "a").y());
+    }
+
+    void networkGridsOnlySingleNodes_data()
+    {
+        QTest::addColumn<int>("count");
+        QTest::addColumn<int>("perRow");
+        QTest::addColumn<int>("rows");
+        QTest::newRow("9 singles") << 9 << 3 << 3;
+        QTest::newRow("10 singles") << 10 << 3 << 4;   // 줄 수는 ⌈√10⌉ = 4, 한 줄은 ⌈10 / 4⌉ = 3
+        QTest::newRow("2 singles") << 2 << 1 << 2;
+        QTest::newRow("1 single") << 1 << 1 << 1;
+    }
+
+    // 관계망: 선 없는 점만 있으면 줄 수 ⌈√점 수⌉ 의 격자다(9개면 3 × 3). 이름 열쇠 순으로 줄마다 왼쪽에서 오른쪽, 점 사이는 kNodeGapX · kNodeGapY
+    void networkGridsOnlySingleNodes()
+    {
+        QFETCH(int, count);
+        QFETCH(int, perRow);
+        QFETCH(int, rows);
+        QVector<KnowledgeConcept> vecConcepts;
+        AddSingles(count, &vecConcepts);
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(vecConcepts, {}, {});
+        GraphLayoutOutput out;
+        QVERIFY(RunLayout(graph, EGraphLayoutType::NETWORK, &out));
+        QCOMPARE(out.vecNodes.size(), count);
+        const double dSlotPitch = GraphLayoutSize::kNodeWidth + GraphLayoutSize::kNodeGapX;
+        const double dRowPitch = GraphLayoutSize::kNodeHeight + GraphLayoutSize::kNodeGapY;
+        for (int iNode = 0; iNode < count; ++iNode)
+        {
+            const QPointF ptExpected = out.vecNodes[0].center + QPointF((iNode % perRow) * dSlotPitch, (iNode / perRow) * dRowPitch);
+            const QPointF ptCenter = out.vecNodes[iNode].center;
+            QVERIFY2(IsNear(ptCenter.x(), ptExpected.x()) && IsNear(ptCenter.y(), ptExpected.y()),
+                     qUtf8Printable(DescribePoint(out.vecNodes[iNode].strId, ptCenter) + QStringLiteral(" / expected ") + DescribePoint(QString(), ptExpected)));
+        }
+        QVERIFY2(IsNear(out.bounds.width(), perRow * GraphLayoutSize::kNodeWidth + (perRow - 1) * GraphLayoutSize::kNodeGapX)
+                     && IsNear(out.bounds.height(), rows * GraphLayoutSize::kNodeHeight + (rows - 1) * GraphLayoutSize::kNodeGapY),
+                 qUtf8Printable(DescribeBox(out.bounds)));
+        const QStringList vecOverlaps = FindOverlaps(out);
+        QVERIFY2(vecOverlaps.isEmpty(), qUtf8Printable(vecOverlaps.join(QStringLiteral(", "))));
+    }
+
+    // 관계망: 큰 덩어리 하나와 작은 덩어리(두 점) 여럿. 작은 것들은 큰 것 오른쪽 열에 위 → 아래로(틈 kComponentGap) 쌓이고,
+    // 열 높이가 큰 덩어리 상자 높이를 넘으면 오른쪽 다음 열의 맨 위로 간다. 같은 입력이면 같은 출력이다
+    void networkStacksSmallComponentsInColumns()
+    {
+        QVector<KnowledgeConcept> vecConcepts;
+        QVector<KnowledgeEdge> vecEdges;
+        AddStar(&vecConcepts, &vecEdges);
+        for (int iPair = 1; iPair <= kSmallPairCount; ++iPair)
+            AddPair(iPair, &vecConcepts, &vecEdges);
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {});
+        QCOMPARE(graph.GetComponents().size(), 1 + kSmallPairCount);
+        QCOMPARE(graph.GetComponents()[0].size(), 1 + kStarLeafCount);
+        GraphLayoutOutput out;
+        QVERIFY(RunLayout(graph, EGraphLayoutType::NETWORK, &out));
+        const QString strColumns = CheckComponentColumns(graph, out);
+        QVERIFY2(strColumns.isEmpty(), qUtf8Printable(strColumns));
+
+        const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+        const QRectF& rectBig = vecBoxes[0];
+        QVERIFY2(IsNear(rectBig.left(), out.bounds.left()) && IsNear(rectBig.top(), out.bounds.top()), qUtf8Printable(DescribeBox(rectBig)));
+        QVERIFY2(IsNear(out.bounds.height(), rectBig.height()), qUtf8Printable(DescribeBox(out.bounds)));   // 열 높이 상한은 큰 덩어리 상자 높이
+        QVERIFY2(IsNear(vecBoxes[1].left(), rectBig.right() + GraphLayoutSize::kComponentGap) && IsNear(vecBoxes[1].top(), rectBig.top()),
+                 qUtf8Printable(DescribeBox(vecBoxes[1])));
+        int iColumns = 0;
+        for (int iPair = 1; iPair <= kSmallPairCount; ++iPair)
+        {
+            QVERIFY2(vecBoxes[iPair].left() >= rectBig.right() + GraphLayoutSize::kComponentGap - kTolerance, qUtf8Printable(DescribeBox(vecBoxes[iPair])));
+            if (IsNear(vecBoxes[iPair].top(), rectBig.top()))
+                ++iColumns;
+            else
+                QVERIFY2(vecBoxes[iPair].top() > vecBoxes[iPair - 1].bottom(), qUtf8Printable(DescribeBox(vecBoxes[iPair])));   // 앞 것 아래
+        }
+        QVERIFY2(iColumns >= 2, qUtf8Printable(QStringLiteral("small components use %1 column(s)").arg(iColumns)));   // 넘쳐서 다음 열로 갔다
+        QVERIFY2(iColumns < kSmallPairCount, "small components are stacked, not one per column");
+        const QStringList vecOverlaps = FindOverlaps(out);
+        QVERIFY2(vecOverlaps.isEmpty(), qUtf8Printable(vecOverlaps.join(QStringLiteral(", "))));
+        const QStringList vecClose = FindCloseComponents(graph, out);
+        QVERIFY2(vecClose.isEmpty(), qUtf8Printable(vecClose.join(QStringLiteral(", "))));
+
+        GraphLayoutOutput again;
+        QVERIFY(RunLayout(KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {}), EGraphLayoutType::NETWORK, &again));
+        QCOMPARE(DescribeLayout(again), DescribeLayout(out));
+    }
+
+    // 관계망: 열 높이 상한 H 는 첫 덩어리가 아니라 가장 높은 덩어리 상자의 높이다. 점 수가 같아 이름 열쇠 순으로 뒤에 놓이는 사슬(B)이
+    // 서로 다 이어진 다섯 점(A)보다 높으면, 그 뒤의 두 점 덩어리들은 사슬 오른쪽 열에 사슬 높이까지 쌓인다
+    void networkColumnLimitIsTallestComponent()
+    {
+        QVector<KnowledgeConcept> vecConcepts;
+        QVector<KnowledgeEdge> vecEdges;
+        for (int iFirst = 1; iFirst <= kLimitGroupSize; ++iFirst)
+        {
+            vecConcepts << MakeConcept(QStringLiteral("a%1").arg(iFirst), QStringLiteral("A%1").arg(iFirst));
+            for (int iSecond = 1; iSecond < iFirst; ++iSecond)
+                vecEdges << MakeEdge(QStringLiteral("a%1").arg(iFirst), "uses", QStringLiteral("a%1").arg(iSecond));
+        }
+        for (int iLink = 1; iLink <= kLimitGroupSize; ++iLink)
+        {
+            vecConcepts << MakeConcept(QStringLiteral("b%1").arg(iLink), QStringLiteral("B%1").arg(iLink));
+            if (iLink > 1)
+                vecEdges << MakeEdge(QStringLiteral("b%1").arg(iLink), "improves", QStringLiteral("b%1").arg(iLink - 1));
+        }
+        for (int iPair = 1; iPair <= kLimitPairCount; ++iPair)
+            AddPair(iPair, &vecConcepts, &vecEdges);
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {});
+        QCOMPARE(graph.GetComponents().size(), 2 + kLimitPairCount);
+        QCOMPARE(graph.GetNodes()[graph.GetComponents()[0].first()].strId, QString("a1"));   // 점 수가 같으면 이름 열쇠 순: A 가 먼저
+        GraphLayoutOutput out;
+        QVERIFY(RunLayout(graph, EGraphLayoutType::NETWORK, &out));
+        const QString strColumns = CheckComponentColumns(graph, out);
+        QVERIFY2(strColumns.isEmpty(), qUtf8Printable(strColumns));
+
+        const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+        const double dPairHeight = vecBoxes[2].height();
+        const double dPairPitch = dPairHeight + GraphLayoutSize::kComponentGap;
+        const int iPerColumn = static_cast<int>((vecBoxes[1].height() + GraphLayoutSize::kComponentGap) / dPairPitch);
+        const int iPerColumnIfFirst = static_cast<int>((vecBoxes[0].height() + GraphLayoutSize::kComponentGap) / dPairPitch);
+        QVERIFY2(iPerColumn > iPerColumnIfFirst, qUtf8Printable(DescribeBox(vecBoxes[0]) + QStringLiteral(" / ") + DescribeBox(vecBoxes[1])));   // 이 입력의 전제
+        QVERIFY2(IsNear(out.bounds.height(), vecBoxes[1].height()), qUtf8Printable(DescribeBox(out.bounds)));
+        int iInFirstPairColumn = 0;
+        for (int iComponent = 2; iComponent < vecBoxes.size(); ++iComponent)
+            if (IsNear(vecBoxes[iComponent].left(), vecBoxes[2].left()))
+                ++iInFirstPairColumn;
+        QCOMPARE(iInFirstPairColumn, qMin(kLimitPairCount, iPerColumn));
+    }
+
+    // 관계망: 선 없는 점은 덩어리 뒤에 격자로 둔다. 지금 열의 남은 높이에 열 너비에 드는 만큼씩(최소 1) 줄을 위 → 아래로 채우고,
+    // 모자라면 오른쪽 새 열로 넘긴다. 새 열에서는 열 높이 상한 H 에 드는 줄 수로 남은 점을 고르게 나눈다(한 줄 ⌈남은 점 / 줄 수⌉)
+    void networkSinglesFillColumnThenOverflow()
+    {
+        QVector<KnowledgeConcept> vecConcepts;
+        QVector<KnowledgeEdge> vecEdges;
+        AddStar(&vecConcepts, &vecEdges);
+        AddPair(1, &vecConcepts, &vecEdges);
+        AddSingles(kOverflowSingleCount, &vecConcepts);
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {});
+        QCOMPARE(graph.GetComponents().size(), 2 + kOverflowSingleCount);
+        GraphLayoutOutput out;
+        QVERIFY(RunLayout(graph, EGraphLayoutType::NETWORK, &out));
+        const QString strColumns = CheckComponentColumns(graph, out);
+        QVERIFY2(strColumns.isEmpty(), qUtf8Printable(strColumns));
+
+        const QVector<QRectF> vecBoxes = ListComponentBoxes(graph, out);
+        const QRectF& rectBig = vecBoxes[0];
+        const QRectF& rectPair = vecBoxes[1];
+        const double dLimit = rectBig.height();
+        const double dSlotPitch = GraphLayoutSize::kNodeWidth + GraphLayoutSize::kNodeGapX;
+        const double dRowPitch = GraphLayoutSize::kNodeHeight + GraphLayoutSize::kNodeGapY;
+        QVERIFY2(IsNear(rectPair.left(), rectBig.right() + GraphLayoutSize::kComponentGap) && IsNear(rectPair.top(), rectBig.top()),
+                 qUtf8Printable(DescribeBox(rectPair)));
+
+        // 두 점 덩어리의 열: 한 줄은 열 너비에 드는 만큼, 줄은 열 높이 상한까지
+        const int iPerRow = qMax(1, static_cast<int>(std::floor((rectPair.width() + GraphLayoutSize::kNodeGapX) / dSlotPitch)));
+        const double dFirstRowTop = rectPair.bottom() + GraphLayoutSize::kComponentGap;
+        int iRows = 0;
+        while (dFirstRowTop + iRows * dRowPitch + GraphLayoutSize::kNodeHeight <= rectBig.top() + dLimit + kTolerance)
+            ++iRows;
+        const int iInColumn = qMin(kOverflowSingleCount, iPerRow * iRows);
+        QVERIFY2(iRows >= 1 && iInColumn < kOverflowSingleCount, qUtf8Printable(QStringLiteral("%1 per row, %2 rows").arg(iPerRow).arg(iRows)));   // 두 경우를 다 지난다
+        double dColumnRight = rectPair.right();
+        for (int iSingle = 0; iSingle < kOverflowSingleCount; ++iSingle)
+        {
+            const QRectF& rectSingle = vecBoxes[2 + iSingle];
+            QPointF ptExpected;
+            if (iSingle < iInColumn)
+            {
+                ptExpected = QPointF(rectPair.left() + (iSingle % iPerRow) * dSlotPitch, dFirstRowTop + (iSingle / iPerRow) * dRowPitch);
+                dColumnRight = qMax(dColumnRight, rectSingle.right());
+            }
+            else
+            {
+                // 새 열: 맨 위부터, 줄 수는 H 에 드는 만큼
+                int iNewRows = 1;
+                while (iNewRows * dRowPitch + GraphLayoutSize::kNodeHeight <= dLimit + kTolerance)
+                    ++iNewRows;
+                const int iRemaining = kOverflowSingleCount - iInColumn;
+                const int iNewPerRow = (iRemaining + iNewRows - 1) / iNewRows;
+                const int iIndex = iSingle - iInColumn;
+                ptExpected = QPointF(dColumnRight + GraphLayoutSize::kComponentGap + (iIndex % iNewPerRow) * dSlotPitch, rectBig.top() + (iIndex / iNewPerRow) * dRowPitch);
+            }
+            QVERIFY2(IsNear(rectSingle.left(), ptExpected.x()) && IsNear(rectSingle.top(), ptExpected.y()),
+                     qUtf8Printable(QStringLiteral("single %1 %2 / expected top left (%3, %4)").arg(iSingle).arg(DescribeBox(rectSingle)).arg(ptExpected.x()).arg(ptExpected.y())));
+            QVERIFY2(rectSingle.bottom() <= rectBig.top() + dLimit + kTolerance, qUtf8Printable(DescribeBox(rectSingle)));
+        }
+        const QStringList vecOverlaps = FindOverlaps(out);
+        QVERIFY2(vecOverlaps.isEmpty(), qUtf8Printable(vecOverlaps.join(QStringLiteral(", "))));
+        const QStringList vecClose = FindCloseComponents(graph, out);
+        QVERIFY2(vecClose.isEmpty(), qUtf8Printable(vecClose.join(QStringLiteral(", "))));
+    }
+
+    // 관계망은 덩어리마다 평행 이동만 한다: 덩어리 안 점끼리의 상대 자리는 그 덩어리만 따로 배치한 것과 같다(합성 그래프 · showcase)
+    void networkMovesEachComponentWhole()
+    {
+        QVector<KnowledgeConcept> vecConcepts;
+        QVector<KnowledgeEdge> vecEdges;
+        AddStar(&vecConcepts, &vecEdges);
+        vecConcepts << MakeConcept("t1", "T1") << MakeConcept("t2", "T2") << MakeConcept("t3", "T3");   // 세모
+        vecEdges << MakeEdge("t1", "uses", "t2") << MakeEdge("t2", "uses", "t3") << MakeEdge("t3", "alternative", "t1");
+        vecConcepts << MakeConcept("c1", "C1") << MakeConcept("c2", "C2") << MakeConcept("c3", "C3") << MakeConcept("c4", "C4");   // 사슬
+        vecEdges << MakeEdge("c2", "improves", "c1") << MakeEdge("c3", "improves", "c2") << MakeEdge("c4", "improves", "c3");
+        AddPair(1, &vecConcepts, &vecEdges);
+        AddSingles(2, &vecConcepts);
+        const KnowledgeGraph graph = KnowledgeGraph::BuildFromParts(vecConcepts, vecEdges, {});
+        QCOMPARE(graph.GetComponents().size(), 6);   // 별 · 세모 · 사슬 · 두 점 덩어리 · 선 없는 점 2
+        const QString strSynthetic = CompareComponentShapes(graph, vecConcepts, vecEdges);
+        QVERIFY2(strSynthetic.isEmpty(), qUtf8Printable(strSynthetic));
+
+        const QString strShowcase = CompareComponentShapes(m_graph, m_index.ListConcepts(), m_index.ListEdges());
+        QVERIFY2(strShowcase.isEmpty(), qUtf8Printable(strShowcase));
     }
 
     // 계보도: 갈래는 큰 것부터(이름 열쇠보다 크기가 먼저), 열은 가장 긴 개선 길이(지름길 선이 있어도),

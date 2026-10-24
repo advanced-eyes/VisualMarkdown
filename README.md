@@ -221,8 +221,8 @@ Ocean/
 | 2 | 라이브러리 뼈대(`CMakeLists.txt` · `tests/`)를 만들고 1층 · 1+층(§5.1)과 그 테스트를 옮긴다. `examples/wiki` 를 읽고 다시 쓰면 바이트가 같은지 보는 테스트를 더한다. Ocean 은 아직 그대로다 | `VisualMarkdownTests` 통과 — 끝(6개 클래스, 82개 통과) |
 | 3 | Ocean 에 서브모듈로 붙이고 1층 사본을 지운다. 검사기는 라이브러리의 이름 정리를 부른다(§6) | 전체 `OceanTests` 통과, 동작 바뀜 없음 — 브랜치에서 끝(98개 클래스 1622개 통과, 6d539cc 기준과 클래스마다 같음. 새로 받은 클론에서도 같음). main 합치기는 남음 |
 | 4 | 2층: `KnowledgeBase` 를 나눠 라이브러리로 옮기고 저장 API 를 바꾼다. Ocean 에 어댑터를 만든다(§5.3) | 두 쪽 테스트 통과, §5.4 기준 |
-| 5 | 3층 보기 모델(그래프 배치 6가지 · 차트 설정)과 2층 읽기 색인 `KnowledgeIndex`([design/Views.md](design/Views.md) §4–§6) | showcase 기대값 시험 통과 — 끝(`VisualMarkdownTests` 10개 클래스 236개) |
-| 6 | 4층 위젯(별도 타깃 `VisualMarkdownView`)과 보기 앱 `VisualMarkdownViewer`(§3.1, design/Views.md §7 · §8) | 위젯 · 보기 앱 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownViewTests` 4개 클래스 128개, `VisualMarkdownViewerTests` 4개 클래스 51개, ctest 5개) |
+| 5 | 3층 보기 모델(그래프 배치 6가지 · 차트 설정)과 2층 읽기 색인 `KnowledgeIndex`([design/Views.md](design/Views.md) §4–§6) | showcase 기대값 시험 통과 — 끝(`VisualMarkdownTests` 10개 클래스 245개) |
+| 6 | 4층 위젯(별도 타깃 `VisualMarkdownView`)과 보기 앱 `VisualMarkdownViewer`(§3.1, design/Views.md §7 · §8) | 위젯 · 보기 앱 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownViewTests` 4개 클래스 128개, `VisualMarkdownViewerTests` 4개 클래스 53개, ctest 5개) |
 
 - 서브모듈 붙이기(3)를 `KnowledgeBase` 나누기(4)보다 먼저 한다. Ocean 어댑터가 라이브러리의 `UpsertConcept` · `SaveDocument` 를 부르려면 라이브러리가 먼저 붙어 있어야 한다. 단계마다 두 쪽 테스트가 모두 통과한 채로 끝난다.
 - 보기(5 · 6단계)는 4단계보다 먼저 했다. 보기는 읽기만 쓰므로 저장 API 를 기다리지 않는다. 읽기 색인 `KnowledgeIndex` 는 5단계에서 만들었다(§5.3).
