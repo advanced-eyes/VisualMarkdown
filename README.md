@@ -66,7 +66,7 @@ VisualMarkdown/
 
 ### 3.1. 보기 앱으로 보기
 
-이 저장소를 따로 빌드하면 보기 앱 `VisualMarkdownViewer` 가 생긴다(옵션 `VISUALMARKDOWN_BUILD_VIEWER`. 서브모듈로 붙으면 만들지 않는다). Windows 에서는 Qt 의 `bin` 폴더(`C:\Qt\5.15.2\mingw81_64\bin` · `C:\Qt\Tools\mingw810_64\bin`)가 PATH 에 있어야 실행된다.
+이 저장소를 따로 빌드하면 보기 앱 `VisualMarkdownViewer` 가 생긴다(옵션 `VISUALMARKDOWN_BUILD_VIEWER`. 서브모듈로 붙으면 만들지 않는다). Windows 에서는 빌드와 실행 모두 Qt 의 `bin` 폴더(`C:\Qt\Tools\mingw810_64\bin` · `C:\Qt\5.15.2\mingw81_64\bin`)가 PATH 에 있어야 한다. MinGW `bin` 이 없으면 컴파일러(`cc1plus.exe`)가 DLL 을 찾지 못해, 빌드가 오류 글 없이 `FAILED: [code=1]` 만 남기고 멈춘다. 사용자 PATH 에 넣은 뒤에는 이미 켜져 있던 VS Code 를 다시 켜야 터미널이 새 PATH 를 받는다. 지금 창에서만 고치려면 `$env:PATH = 'C:\Qt\Tools\mingw810_64\bin;C:\Qt\5.15.2\mingw81_64\bin;' + $env:PATH` 를 먼저 실행한다.
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/5.15.2/mingw81_64
