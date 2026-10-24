@@ -1,6 +1,6 @@
 # 시각화 시험용 예시
 
-모든 보기(지식 사이 · 지식 안)를 한 번에 시험하는 wiki 다. `wiki/` 를 그대로 Obsidian 볼트나 VS Code 폴더로 열 수 있다. 보기(README §7 의 5 · 6단계)를 만들면 이 폴더를 열어 아래 기대값과 맞춰 본다.
+모든 보기(지식 사이 · 지식 안)를 한 번에 시험하는 wiki 다. `wiki/` 를 그대로 Obsidian 볼트나 VS Code 폴더로 열 수 있다. 보기 앱([README §3.1](../../README.md#31-보기-앱으로-보기))은 폴더를 주지 않으면 이 wiki 를 연다. 아래 기대값은 색인 · 배치 · 차트 · 위젯 · 보기 앱 시험이 확인한다.
 
 - 내용: 객체 검출 논문 4편(YOLO · YOLO9000 · YOLOv3 · Focal Loss), 손으로 정리한 노트 1편(2단계 검출기), 가상의 기획서 1편(결제 서비스). 논문 숫자는 원문의 표와 초록에서 옮겼다(설명용). 기획서와 그 숫자는 지어낸 것이다.
 - 모든 파일은 라이브러리가 쓰는 정준 모양이다. `tests/ShowcaseWikiTest.cpp` 가 읽고 다시 쓰면 바이트가 같은지와 이 문서의 기대값을 확인한다.
@@ -91,4 +91,4 @@
 ## 5. 고칠 때
 
 - 정해진 부분을 고치면 `digest` 를 다시 계산한다([ReadWrite.md §6](../../format/ReadWrite.md#6-digest)).
-- 기대값이 바뀌면 이 문서와 `tests/ShowcaseWikiTest.cpp` 를 같은 커밋에서 고친다.
+- 기대값이 바뀌면 이 문서와 `tests/ShowcaseWikiTest.cpp` 를 같은 커밋에서 고친다. 문서 · 표가 바뀌면 보기 앱 스냅샷의 기대 목록 `tests/viewer/showcase-snapshot.tsv` 도 고친다.

@@ -46,6 +46,9 @@ public:
 
 public:
     double GetCellSize() const;
+    // 가장 작은 칸(kMinCellSize)에서 이름표 · 칸 · 범례가 모두 위젯 안에 드는 크기. 이보다 작은 자리(예: 스크롤 영역)에서는 행렬을 스크롤로 본다.
+    // 그릴 점이 없으면 비었다(QSize())
+    QSize minimumSizeHint() const override;
 
 public:
     static constexpr double kMinCellSize = 14;   // 칸이 이보다 작아지면 읽기 어렵다. 위젯이 작으면 행렬이 위젯 밖으로 나간다
@@ -73,9 +76,18 @@ private:
         QRectF legend;
     };
 
+    // 이름표가 차지하는 칸(위젯 크기와 상관없다): 행 이름표 너비, 열 이름표 높이, 마지막 열 이름표가 칸 오른쪽으로 넘치는 길이
+    struct LabelExtent
+    {
+        double dRowLabelWidth = 0;
+        double dColumnLabelHeight = 0;
+        double dOverhang = 0;
+    };
+
 private:
     void RebuildCells();
     MatrixGeometry ComputeGeometry() const;
+    LabelExtent MeasureLabels() const;
     QVector<int> FindCellEdges(int row, int column) const;   // 그 칸에 떨어지는 배치 선
     QString MakeCellToolTip(int row, int column) const;
     QString MakeLabelToolTip(int node) const;

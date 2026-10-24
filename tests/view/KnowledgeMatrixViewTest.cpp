@@ -5,6 +5,8 @@
 #include "VisualMarkdown/UI/VisualMarkdownTheme.h"
 #include "ViewTestSupport.h"
 
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTest>
 
 #include <memory>
@@ -294,6 +296,49 @@ private slots:
         view.SetGraph(m_graph, m_layout);
         QCOMPARE(view.GetCellSize(), KnowledgeMatrixView::kMinCellSize);
         QVERIFY(ViewTestSupport::HasEnoughInk(ViewTestSupport::Render(view), VisualMarkdownTheme::MakeLight().background));
+    }
+
+    // 크기 힌트(보기 앱이 창보다 큰 행렬을 스크롤로 보게 한다): 가장 작은 칸에서 이름표 · 칸 · 범례가 모두 위젯 안에 드는 크기다.
+    // 점 수만큼 크면 칸이 1px 커지고(넉넉하지 않다), 그만큼 작으면 칸이 위젯 밖으로 나간다(모자라지 않다).
+    // 스크롤 영역에 넣으면 힌트보다 작게 줄지 않고, 그래프를 바꾸면 새 힌트를 따른다(updateGeometry)
+    void minimumSizeHintFitsMinimumCells()
+    {
+        QVERIFY(!KnowledgeMatrixView().minimumSizeHint().isValid());   // 그릴 점이 없으면 힌트가 없다
+
+        KnowledgeMatrixView view;
+        view.SetGraph(m_graph, m_layout);
+        const QSize sizeHint = view.minimumSizeHint();
+        QVERIFY(sizeHint.isValid());
+        view.resize(sizeHint);
+        QCOMPARE(view.GetCellSize(), KnowledgeMatrixView::kMinCellSize);
+        const QRectF rectWidget(view.rect());
+        QVERIFY2(rectWidget.contains(view.GetGridRect()), qPrintable(ViewTestSupport::DescribeRect(view.GetGridRect())));
+        QVERIFY2(rectWidget.contains(view.GetLegendRect()), qPrintable(ViewTestSupport::DescribeRect(view.GetLegendRect())));
+        QVERIFY(!view.GetGridRect().intersects(view.GetLegendRect()));
+        for (int iColumn = 0; iColumn < kOrder; ++iColumn)
+        {
+            const QRectF rectLabel = view.GetColumnLabelArea(iColumn).boundingRect();
+            QVERIFY2(rectWidget.contains(rectLabel) && !rectLabel.intersects(view.GetLegendRect()),
+                     qPrintable(QString::number(iColumn) + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectLabel)));
+        }
+        view.resize(sizeHint + QSize(kOrder, kOrder));
+        QCOMPARE(view.GetCellSize(), KnowledgeMatrixView::kMinCellSize + 1);
+        view.resize(sizeHint - QSize(kOrder, kOrder));
+        QVERIFY(!QRectF(view.rect()).contains(view.GetGridRect()));
+
+        QScrollArea area;
+        area.setWidgetResizable(true);
+        KnowledgeMatrixView* pView = new KnowledgeMatrixView;
+        area.setWidget(pView);
+        area.resize(kSmallSize);
+        area.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&area));
+        pView->SetGraph(m_graph, m_layout);
+        QTRY_VERIFY2(pView->width() >= sizeHint.width() && pView->height() >= sizeHint.height(),
+                     qPrintable(QStringLiteral("%1×%2").arg(pView->width()).arg(pView->height())));
+        QCOMPARE(pView->GetCellSize(), KnowledgeMatrixView::kMinCellSize);
+        QVERIFY(area.horizontalScrollBar()->maximum() > 0);
+        QVERIFY(area.verticalScrollBar()->maximum() > 0);
     }
 
     // 빈 배치도 죽지 않는다

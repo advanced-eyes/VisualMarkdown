@@ -65,6 +65,7 @@ void KnowledgeMatrixView::SetGraph(const KnowledgeGraph& graph, const GraphLayou
     m_graph = graph;
     m_layout = layout;
     RebuildCells();
+    updateGeometry();   // 크기 힌트가 바뀐다(점 수 · 이름표)
     update();
 }
 
@@ -72,6 +73,7 @@ void KnowledgeMatrixView::SetTheme(const VisualMarkdownTheme& theme)
 {
     m_theme = theme;
     RebuildCells();   // 범례 크기는 글꼴에 따른다
+    updateGeometry();
     update();
 }
 
@@ -142,6 +144,24 @@ QPolygonF KnowledgeMatrixView::GetColumnLabelArea(int column) const
 double KnowledgeMatrixView::GetCellSize() const
 {
     return ComputeGeometry().dCell;
+}
+
+QSize KnowledgeMatrixView::minimumSizeHint() const
+{
+    const int iOrder = m_layout.vecNodes.size();
+    if (iOrder == 0)
+        return QSize();
+    // ComputeGeometry 를 거꾸로 푼다: 칸 영역(여백 · 이름표 · 넘치는 열 이름표 · 범례 판을 뺀 곳)이 가장 작은 칸 × 점 수가 되는 크기
+    const LabelExtent extent = MeasureLabels();
+    const double dGridSize = kMinCellSize * iOrder;
+    double dWidth = 2 * kMargin + extent.dRowLabelWidth + dGridSize + extent.dOverhang;
+    double dHeight = 2 * kMargin + extent.dColumnLabelHeight + dGridSize;
+    if (!m_sizeLegend.isEmpty())
+    {
+        dWidth += kPanelGap + m_sizeLegend.width();
+        dHeight = std::max(dHeight, 2.0 * kMargin + m_sizeLegend.height());
+    }
+    return QSize(static_cast<int>(std::ceil(dWidth)), static_cast<int>(std::ceil(dHeight)));
 }
 
 bool KnowledgeMatrixView::event(QEvent* event)
@@ -295,15 +315,10 @@ KnowledgeMatrixView::MatrixGeometry KnowledgeMatrixView::ComputeGeometry() const
     if (iOrder == 0)
         return geometry;
 
-    // 이름표 너비는 가장 긴 이름(정한 너비까지). 열 이름표는 45° 라 위로 너비 × sin45, 오른쪽으로 너비 × cos45 를 차지한다
-    const QFontMetricsF metrics(MakeFont(m_theme.iLabelFontPx));
-    double dLabel = 0;
-    for (int iNode = 0; iNode < iOrder; ++iNode)
-        dLabel = std::max(dLabel, metrics.horizontalAdvance(GetNodeName(iNode)));
-    dLabel = std::min(dLabel, kMaxLabelWidth);
-    geometry.dRowLabelWidth = dLabel + kLabelGap;
-    const double dColumnLabelHeight = (dLabel + metrics.height()) * kSqrtHalf + kLabelGap;
-    const double dOverhang = dLabel * kSqrtHalf;
+    const LabelExtent extent = MeasureLabels();
+    geometry.dRowLabelWidth = extent.dRowLabelWidth;
+    const double dColumnLabelHeight = extent.dColumnLabelHeight;
+    const double dOverhang = extent.dOverhang;
 
     const double dAreaLeft = kMargin;
     const double dAreaRight = geometry.legend.isEmpty() ? width() - kMargin : geometry.legend.left() - kPanelGap;
@@ -319,6 +334,21 @@ KnowledgeMatrixView::MatrixGeometry KnowledgeMatrixView::ComputeGeometry() const
     const double dBlockLeft = dAreaLeft + std::max(0.0, (dAreaRight - dAreaLeft - dBlockWidth) / 2);
     geometry.grid = QRectF(dBlockLeft + geometry.dRowLabelWidth, dAreaTop + dColumnLabelHeight, dGridSize, dGridSize);
     return geometry;
+}
+
+KnowledgeMatrixView::LabelExtent KnowledgeMatrixView::MeasureLabels() const
+{
+    // 이름표 너비는 가장 긴 이름(정한 너비까지). 열 이름표는 45° 라 위로 너비 × sin45, 오른쪽으로 너비 × cos45 를 차지한다
+    const QFontMetricsF metrics(MakeFont(m_theme.iLabelFontPx));
+    double dLabel = 0;
+    for (int iNode = 0; iNode < m_layout.vecNodes.size(); ++iNode)
+        dLabel = std::max(dLabel, metrics.horizontalAdvance(GetNodeName(iNode)));
+    dLabel = std::min(dLabel, kMaxLabelWidth);
+    LabelExtent extent;
+    extent.dRowLabelWidth = dLabel + kLabelGap;
+    extent.dColumnLabelHeight = (dLabel + metrics.height()) * kSqrtHalf + kLabelGap;
+    extent.dOverhang = dLabel * kSqrtHalf;
+    return extent;
 }
 
 QVector<int> KnowledgeMatrixView::FindCellEdges(int row, int column) const

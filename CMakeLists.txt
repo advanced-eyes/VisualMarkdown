@@ -92,6 +92,46 @@ if(TARGET Qt5::Widgets)
 endif()
 
 ################################################################################
+# VisualMarkdownViewer : 보기 앱(design/Views.md §8). 폴더 열기 · 보기 고르기 · --snapshot 으로 모든 보기를 PNG 로 남긴다.
+#   이 저장소를 따로 빌드할 때만 만든다. Ocean 이 서브모듈로 붙이면 OFF 라 Ocean 빌드에 끼지 않는다.
+#   VisualMarkdownView(QtWidgets) 타깃이 있을 때만 만든다. 콘솔 실행 파일이다(WIN32 가 아니다): 스냅샷 오류를 콘솔에 쓴다.
+################################################################################
+option(VISUALMARKDOWN_BUILD_VIEWER "Build the VisualMarkdownViewer app" ${PROJECT_IS_TOP_LEVEL})
+
+if(VISUALMARKDOWN_BUILD_VIEWER AND NOT TARGET VisualMarkdownView)
+    message(STATUS "VisualMarkdownViewer: Qt5 Widgets 가 없어(VisualMarkdownView 타깃 없음) 보기 앱을 만들지 않는다")
+endif()
+
+if(VISUALMARKDOWN_BUILD_VIEWER AND TARGET VisualMarkdownView)
+    set(VISUALMARKDOWN_VIEWER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/VisualMarkdownViewer)
+    file(GLOB VISUALMARKDOWN_VIEWER_SOURCES CONFIGURE_DEPENDS
+        ${VISUALMARKDOWN_VIEWER_SOURCE_DIR}/*.h
+        ${VISUALMARKDOWN_VIEWER_SOURCE_DIR}/*.cpp)
+    list(REMOVE_ITEM VISUALMARKDOWN_VIEWER_SOURCES ${VISUALMARKDOWN_VIEWER_SOURCE_DIR}/main.cpp)
+
+    # main.cpp 를 뺀 앱 소스. 시험(VisualMarkdownViewerTests)도 이것을 링크한다
+    add_library(VisualMarkdownViewerLib STATIC ${VISUALMARKDOWN_VIEWER_SOURCES})
+    set_target_properties(VisualMarkdownViewerLib PROPERTIES
+        AUTOMOC ON
+        CXX_EXTENSIONS OFF)
+    target_compile_features(VisualMarkdownViewerLib PUBLIC cxx_std_17)
+    # 쓰는 쪽은 #include "VisualMarkdownViewer/VisualMarkdownViewerModel.h" 로 쓴다.
+    target_include_directories(VisualMarkdownViewerLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tools)
+    target_link_libraries(VisualMarkdownViewerLib PUBLIC VisualMarkdownView)
+    target_compile_definitions(VisualMarkdownViewerLib PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+    target_compile_options(VisualMarkdownViewerLib PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
+
+    add_executable(VisualMarkdownViewer ${VISUALMARKDOWN_VIEWER_SOURCE_DIR}/main.cpp)
+    set_target_properties(VisualMarkdownViewer PROPERTIES CXX_EXTENSIONS OFF)
+    target_link_libraries(VisualMarkdownViewer PRIVATE VisualMarkdownViewerLib)
+    # 폴더를 주지 않으면 여는 wiki(시험 타깃의 VISUALMARKDOWN_SHOWCASE_DIR 과 같은 이름 · 값)
+    target_compile_definitions(VisualMarkdownViewer PRIVATE
+        QT_DISABLE_DEPRECATED_BEFORE=0x050F00
+        VISUALMARKDOWN_SHOWCASE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/showcase/wiki")
+    target_compile_options(VisualMarkdownViewer PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
+endif()
+
+################################################################################
 # Tests (Qt Test, 개발용 — Ocean 빌드에는 끼지 않는다)
 ################################################################################
 if(VISUALMARKDOWN_BUILD_TESTS)
@@ -154,4 +194,40 @@ if(VISUALMARKDOWN_BUILD_TESTS)
         list(APPEND VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT "QT_QPA_FONTDIR=set:${VISUALMARKDOWN_WINDOWS_FONT_DIR}")
     endif()
     set_tests_properties(VisualMarkdownViewTests PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT}")
+
+    # 보기 앱 시험(tests/viewer/): 인자 · 화면 로직(QtCore) · 창 · 스냅샷. 보기 앱을 만들 때만
+    if(TARGET VisualMarkdownViewer)
+        file(GLOB VISUALMARKDOWN_VIEWER_TEST_SOURCES CONFIGURE_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/viewer/*.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/viewer/*.h)
+        add_executable(VisualMarkdownViewerTests ${VISUALMARKDOWN_VIEWER_TEST_SOURCES})
+        set_target_properties(VisualMarkdownViewerTests PROPERTIES
+            AUTOMOC ON
+            CXX_EXTENSIONS OFF)
+        # 위젯 시험의 도움 함수(tests/view/ViewTestSupport.h)를 함께 쓴다
+        target_include_directories(VisualMarkdownViewerTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/view)
+        target_link_libraries(VisualMarkdownViewerTests PRIVATE VisualMarkdownViewerLib Qt5::Test)
+        target_compile_definitions(VisualMarkdownViewerTests PRIVATE
+            QT_DISABLE_DEPRECATED_BEFORE=0x050F00
+            VISUALMARKDOWN_SHOWCASE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples/showcase/wiki"
+            VISUALMARKDOWN_VIEWER_EXPECTED_TSV="${CMAKE_CURRENT_SOURCE_DIR}/tests/viewer/showcase-snapshot.tsv")
+        target_compile_options(VisualMarkdownViewerTests PRIVATE ${VISUALMARKDOWN_COMPILE_OPTIONS})
+        add_test(NAME VisualMarkdownViewerTests COMMAND VisualMarkdownViewerTests)
+        set_tests_properties(VisualMarkdownViewerTests PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_VIEW_TEST_ENVIRONMENT}")
+
+        # 스냅샷(cmake -P): 빌드 폴더 안의 새 폴더에 showcase 스냅샷을 찍고 끝 코드 0 · PNG 18개 · snapshot.tsv(기대 파일과 바이트로 같음)를 본다.
+        # 앱이 offscreen · 글꼴 폴더를 스스로 정하는지 보도록 그 환경 변수는 지운다
+        add_test(NAME VisualMarkdownViewerSnapshotTest
+                 COMMAND ${CMAKE_COMMAND}
+                         -DVIEWER_EXE=$<TARGET_FILE:VisualMarkdownViewer>
+                         -DWIKI_DIR=${CMAKE_CURRENT_SOURCE_DIR}/examples/showcase/wiki
+                         -DEXPECTED_TSV=${CMAKE_CURRENT_SOURCE_DIR}/tests/viewer/showcase-snapshot.tsv
+                         -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/VisualMarkdownViewerSnapshotTest
+                         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/viewer/SnapshotTest.cmake)
+        set(VISUALMARKDOWN_SNAPSHOT_TEST_ENVIRONMENT "QT_QPA_PLATFORM=unset:" "QT_QPA_FONTDIR=unset:")
+        if(WIN32)
+            list(APPEND VISUALMARKDOWN_SNAPSHOT_TEST_ENVIRONMENT ${VISUALMARKDOWN_TEST_ENVIRONMENT})
+        endif()
+        set_tests_properties(VisualMarkdownViewerSnapshotTest PROPERTIES ENVIRONMENT_MODIFICATION "${VISUALMARKDOWN_SNAPSHOT_TEST_ENVIRONMENT}")
+    endif()
 endif()

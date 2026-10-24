@@ -3,3 +3,7 @@
 
 # 예시 wiki 는 "읽고 다시 쓰면 바이트가 같다" 테스트의 기준이다. Windows 체크아웃(core.autocrlf)에서도 LF 로 둔다.
 examples/** text eol=lf
+
+# 보기 앱 스냅샷 목록의 기대 파일. snapshot.tsv(LF 로 쓴다)와 바이트로 견주므로 LF 로 둔다.
+# 그래프 줄은 뒤 세 칸이 비어 줄 끝이 탭이다. 일부러 둔 것이라 공백 검사(git diff --check)에서 뺀다(편집기로 줄 끝 공백을 지우면 시험이 깨진다).
+tests/viewer/*.tsv text eol=lf -whitespace

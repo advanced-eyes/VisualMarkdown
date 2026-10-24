@@ -1,0 +1,19 @@
+파일	보기	문서 id	표 제목	차트 종류
+graph-network.png	network			
+graph-lineage.png	lineage			
+graph-tree.png	tree			
+graph-timeline.png	timeline			
+graph-matrix.png	matrix			
+graph-bipartite.png	bipartite			
+chart-01-01.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	월별 응답 시간	LINE
+chart-01-02.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	결제 수단별 비중	BAR
+chart-01-03.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	동시 사용자와 응답 시간	SCATTER
+chart-01-04.png	chart	4e6b9c54-a01d-4e2f-83a4-b5c6d7e8f916	기능 우선순위	NONE
+chart-03-01.png	chart	1c4f7a32-8e9b-4c0d-a1e2-f3b4c5d6e794	2단계 검출기의 VOC 2007 정확도	BAR
+chart-03-02.png	chart	1c4f7a32-8e9b-4c0d-a1e2-f3b4c5d6e794	학습 · 시험 시간	BAR
+chart-04-01.png	chart	7b3e9c21-4d5f-4a6b-8c7d-3e2f1a0b9c83	입력 크기별 COCO 정확도	LINE
+chart-04-02.png	chart	7b3e9c21-4d5f-4a6b-8c7d-3e2f1a0b9c83	처리 시간과 AP50	SCATTER
+chart-05-01.png	chart	5e2d8b10-7c4a-4f3e-b9d6-2a1f0c9e8d72	YOLO 에서 YOLOv2 까지 — 하나씩 더한 개선	STEP_BAR
+chart-05-02.png	chart	5e2d8b10-7c4a-4f3e-b9d6-2a1f0c9e8d72	입력 크기에 따른 정확도와 속도	LINE
+chart-05-03.png	chart	5e2d8b10-7c4a-4f3e-b9d6-2a1f0c9e8d72	검출기별 VOC 2007 정확도	BAR
+chart-06-01.png	chart	9a6c1f2e-3b4d-4e5f-8a7b-1c2d3e4f5a61	실시간 검출기와 그 밖의 검출기 — 정확도와 속도	SCATTER

@@ -54,8 +54,16 @@ src/VisualMarkdown/
     ├── VisualMarkdownTheme.h/.cpp
     ├── KnowledgeGraphView.h/.cpp      관계망 · 계보도 · 분류 트리 · 타임라인 · 문서 ↔ 개념
     ├── KnowledgeMatrixView.h/.cpp     관계 행렬
-    └── KnowledgeChartView.h/.cpp      차트
-tools/VisualMarkdownViewer/            보기 앱
+    ├── KnowledgeChartView.h/.cpp      차트
+    └── ViewCommon.h/.cpp              세 위젯이 함께 쓰는 도움 함수(쓰는 쪽에 내놓는 머리글이 아니다)
+tools/VisualMarkdownViewer/            보기 앱(§8). main.cpp 를 뺀 소스는 VisualMarkdownViewerLib 로 묶어 시험이 링크한다
+├── VisualMarkdownViewerModel          화면 로직(QtCore): 색인 · 보기 6개의 배치 · 표마다의 차트 설정
+├── VisualMarkdownViewerWindow         창: 나무 · 쪽 · 도구 막대 · 상태 줄
+├── VisualMarkdownViewerChartPage · MatrixPage · Palette   차트 쪽(차트 + 원래 표) · 행렬 쪽(스크롤) · 테마 → 창 팔레트
+├── VisualMarkdownViewerSnapshot       스냅샷 모드
+└── VisualMarkdownViewerOptions        인자 · 끝 코드
+tests/view/                            VisualMarkdownViewTests(위젯)
+tests/viewer/                          VisualMarkdownViewerTests(보기 앱) · 스냅샷 시험(SnapshotTest.cmake · showcase-snapshot.tsv)
 ```
 
 - 1–3층(`VisualMarkdown` 타깃)은 QtCore 만 쓴다. `QPointF` · `QRectF` 는 QtCore 다. 글자 크기를 재지 않는다(배치는 점 상자 크기를 정해진 값으로 쓴다. 글자 줄이기는 위젯이 한다).
@@ -198,19 +206,27 @@ showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한�
 
 ## 8. 보기 앱
 
-- `VisualMarkdownViewer [wiki 폴더]`. 폴더를 주지 않으면 이 저장소의 `examples/showcase/wiki` 를 연다.
-- 왼쪽: 지식 사이(관계망 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념), 지식 안(문서 → 표). 오른쪽: 고른 보기. 지식 안에서는 차트 아래에 원래 표를 함께 보인다.
-- 도구: 폴더 열기, 밝음/어둠, 맞춤. 상태 줄: 점 · 선 · 문서 수와 경고 수.
-- `--snapshot <폴더> [--theme light|dark] [--size 가로x세로]`: 보기 6개와 표마다의 차트를 PNG 로 남기고 끝난다. 화면이 없어도 돈다(offscreen).
-- 빌드: `VISUALMARKDOWN_BUILD_VIEWER`(기본: 이 저장소가 최상위일 때만).
+- `VisualMarkdownViewer [wiki 폴더] [--theme light|dark] [--size 가로x세로]`. 폴더를 주지 않으면 이 저장소의 `examples/showcase/wiki` 를 연다. `--size` 를 주지 않으면 창은 1600×1000 을 화면의 85% 안으로 줄인 크기다.
+- 왼쪽 나무: 지식 사이(관계망 · 계보도 · 분류 트리 · 타임라인 · 관계 행렬 · 문서 ↔ 개념), 지식 안(문서 → 표, 표 이름 뒤에 차트 종류). 문서를 고르면 문서 쪽(제목 · 표 목록)을 보이고, 표가 없는 문서는 그렇다고 알린다.
+- 오른쪽: 고른 보기. 관계 행렬은 가장 작은 칸에서도 창보다 크면 스크롤로 본다(`KnowledgeMatrixView::minimumSizeHint`).
+- 지식 안: 차트 아래에 원래 표(읽기 전용, 머리 줄은 열 이름과 단위, 칸은 원문 글 그대로)를 보인다. 차트 종류 상자(추천 · 막대 · 단계 막대 · 선 · 산점도)로 바꿀 수 있다(`KnowledgeChartBuilder::SetStrategy` · 추천이면 `ResetStrategy`, 표마다 기억한다). 차트로 그리지 않는 표는 제목 · 까닭 한 줄 · 표를 보이고 상자를 끈다.
+- 도구: 폴더 열기(읽지 못하면 알리고 앞의 wiki 를 그대로 둔다), 밝음/어둠(창 팔레트도 따른다), 맞춤. 상태 줄: 점 · 선 · 문서 · 빠진 관계 · 경고 수(마우스 올림으로 목록).
+- 점을 누르면(`ConceptActivated`) 상태 줄에 그 개념의 이름 · 종류 · 연도를 보인다. 문서 ↔ 개념에서 문서를 누르면(`DocumentActivated`) 나무에서 그 문서를 고른다.
+- 배치는 보기를 처음 열 때 계산하고 wiki 를 다시 읽을 때까지 둔다. 차트 설정은 표를 고를 때 만든다.
+- `--snapshot <폴더> [--theme light|dark] [--size 가로x세로]`(기본 light · 1600×1000): 화면 없이(offscreen) 창과 같은 쪽 위젯을 그려 PNG 로 남기고 끝난다.
+  - 파일: `graph-network.png` · `graph-lineage.png` · `graph-tree.png` · `graph-timeline.png` · `graph-matrix.png` · `graph-bipartite.png`, 표마다 `chart-DD-TT.png`(DD 는 문서 목록 순 · TT 는 문서 안 표 순, 1부터 두 자리)
+  - `snapshot.tsv`(UTF-8 · LF, 머리 줄 있음): 파일 · 보기(network … bipartite · chart) · 문서 id · 표 제목 · 차트 종류(`EChartType` 이름)
+  - 끝 코드: 0 성공, 2 잘못된 인자(모르는 인자 · 같은 인자 두 번 · `--size` 한 변 1–8192 밖 · 모르는 `--theme`), 3 wiki 를 읽지 못함, 4 파일을 못 씀. 까닭은 표준 오류에 쓴다.
+- 빌드: `VISUALMARKDOWN_BUILD_VIEWER`(기본: 이 저장소가 최상위일 때만). 콘솔 실행 파일이다(스냅샷 오류를 콘솔에 쓴다).
 
 ## 9. 테스트
 
 - `KnowledgeIndexTest`: showcase README §2.1 의 기대값을 진짜 색인으로 확인한다. `ShowcaseWikiTest` 안에 있던 색인 계산은 `KnowledgeIndex` 로 바꾼다(기대값은 그대로).
 - `KnowledgeGraphLayoutTest`: §5 의 showcase 기대값과 배치 조건(겹침 없음 · 방향 · 깊이 · 순서), 같은 입력이면 같은 배치.
 - `KnowledgeChartBuilderTest`: 표 12개가 README §3 과 같은 차트 · 계열 · 축 · 빈 값을 내는지, 숫자 읽기.
-- `VisualMarkdownViewTests`(offscreen): 보기마다 그려지는지(비지 않음, 두 번 그리면 같음), 위치로 점 · 칸 찾기, 테마 바꾸기.
-- 보기 앱 스냅샷이 PNG 를 모두 남기는지(ctest).
+- `VisualMarkdownViewTests`(offscreen): 보기마다 그려지는지(비지 않음, 두 번 그리면 같음), 위치로 점 · 칸 찾기, 테마 바꾸기, 색 대비, 설명 글, 상호작용. `VISUALMARKDOWN_SNAPSHOT_DIR` 을 정하면 그린 그림을 PNG 로 남긴다.
+- `VisualMarkdownViewerTests`(offscreen): 인자 · 끝 코드, 화면 로직(보기 6개의 점 · 선 수, 표 12개의 차트 종류, 종류 바꾸기 · 되돌리기, 읽기 실패 때 앞 상태 지키기), 창(나무 → 쪽, `DocumentActivated` → 나무, 테마, 차트 종류 상자, 그리지 않는 표, 상태 줄), 스냅샷.
+- `VisualMarkdownViewerSnapshotTest`(ctest, `cmake -P`): 실행 파일로 showcase 스냅샷을 찍어 끝 코드 0 · PNG 18개 · 그림 크기를 보고, `snapshot.tsv` 가 `tests/viewer/showcase-snapshot.tsv` 와 바이트로 같은지 본다. 잘못된 인자 · 없는 wiki · 못 쓰는 파일의 끝 코드도 본다.
 
 ## 10. 순서
 
@@ -220,7 +236,7 @@ showcase 의 표 12개가 README §3 의 시작 차트와 같게 나와야 한�
 2. 그래프 모델 · 배치 6가지 — 끝
 3. 차트 설정 — 끝
 4. 테마 · 위젯 3개 · 위젯 테스트 — 끝
-5. 보기 앱 · 스냅샷 · 문서 반영(README · Visualization.md)
+5. 보기 앱 · 스냅샷 · 문서 반영(README · Visualization.md) — 끝
 
 ## 11. 남은 위험
 

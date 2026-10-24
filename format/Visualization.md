@@ -13,7 +13,7 @@
 
 ## 2. 색인 — 파일에서 그래프로
 
-라이브러리의 `KnowledgeBase` 가 `wiki/` 를 읽어 메모리에 만든다.
+라이브러리의 읽기 전용 색인 `KnowledgeIndex` 가 `wiki/` 를 읽어 메모리에 만든다. 읽기 규칙은 Ocean `KnowledgeBase::Reload` · `RebuildIndex` 와 같다. 4단계에서 라이브러리로 옮길 `KnowledgeBase`(저장)도 읽기는 이것을 쓴다(README §5.3).
 
 **점(개념)**
 - 개념 파일 하나가 점 하나다. id 는 파일 이름이다.
@@ -26,24 +26,29 @@
 - (from · 종류 · to) 가 같으면 선 하나로 합친다. 방향 없는 종류는 두 id 를 글자 순으로 놓고 합친다(A ↔ B = B ↔ A).
 - 합친 선의 상태는, 하나라도 확인됨이면 확인됨이다.
 - 합친 선은 출처를 갖는다: 그 관계를 말한 문서 id 들, 개념 파일에서 왔는지.
-- from 이나 to 의 개념 파일이 없으면 그 선은 넣지 않는다(로그는 남기지 않는다).
+- from 이나 to 의 개념 파일이 없으면 그 선은 넣지 않는다. 빠진 관계는 출처(문서 id, 개념 파일이면 그 개념 id)와 함께 따로 모은다(경고로는 남기지 않는다).
 
 **문서**
 - 문서 목록은 머리글 `learned` 가 늦은 것부터 준다(같으면 id 순).
 
-색인이 주는 것(지금 Ocean 코드의 공개 함수)
+색인이 주는 것(`KnowledgeIndex` 의 공개 함수, [design/Views.md §4](../design/Views.md#4-색인knowledgeindex))
 
 | 함수 | 주는 것 |
 | --- | --- |
-| `ListConcepts(includeHidden)` | 점 목록(이름 열쇠 순) |
-| `FindConcept(id)` · `FindConceptIdByName(nameOrAlias)` | 점 하나 |
-| `ListRelations()` | 합친 선 목록: from id · 종류 · to id · 상태 · 출처 문서 id 들 · 개념 파일에서 왔는지 |
+| `Load(wikiRoot)` | `documents/` · `concepts/` 를 읽는다. 읽지 못한 파일은 건너뛰고 경고로 남긴다 |
+| `ListConcepts(includeHidden)` | 점 목록(이름 열쇠 순). 숨은 개념은 `includeHidden` 일 때만 |
+| `FindConcept(id)` · `FindConceptIdByName(nameOrAlias)` · `IsHidden(id)` | 점 하나 |
+| `ListEdges()` | 합친 선 목록: from id · 종류 · to id · 상태 · 출처 문서 id 들 · 개념 파일에서 왔는지 · 출처마다의 `설명` |
+| `ListDroppedRelations()` | 개념 파일이 없어 빠진 관계와 그 출처 |
 | `ListDocuments()` · `FindDocument(id)` | 문서 기록: 카드 · 관계 · 표 |
-| `ListKnownConcepts()` | 점마다 이름 · 별칭 · 종류 · 다루는 문서 수 |
+| `ListDocumentIdsPointingTo(conceptId)` | 그 개념을 가리키는 문서들. 그 수가 "다루는 문서 수"다 |
+| `GetWarnings()` | 읽기 경고(없는 폴더, 건너뛴 파일, 파일 이름과 다른 머리글 id) |
+
+Ocean `KnowledgeBase` 의 `ListRelations` · `ListKnownConcepts` 가 주던 것은 `ListEdges` · `ListConcepts` · `ListDocumentIdsPointingTo` 로 얻는다.
 
 ## 3. 지식 사이 보기가 쓸 수 있는 칸
 
-스펙이 이름을 든 보기와, 그 보기가 읽을 수 있는 칸이다. 보기 자체는 아직 정하지 않았다(README §10).
+보기 6가지와, 각 보기가 읽는 칸이다. 보기마다의 배치는 [design/Views.md §5](../design/Views.md#5-그래프-배치)에서 정했다.
 
 | 보기 | 쓰는 칸 |
 | --- | --- |
@@ -54,7 +59,7 @@
 | 관계 행렬 | 개념 × 개념, 칸 = 관계 종류 |
 | 문서 ↔ 개념 | 카드 `개념:`, 표 `concepts`, 관계의 출처 문서 |
 
-- B 가 A 를 개선했다면 B 를 볼 때 A 와 "무엇을 고쳤는지"(관계의 `설명`)가 함께 보이게 하는 것이 목표다.
+- B 가 A 를 개선했다면 B 를 볼 때 A 와 "무엇을 고쳤는지"(관계의 `설명`)가 함께 보이게 한다. 개념 점의 설명에 그 개념이 개선한 것과 그 `설명` 이 함께 나온다([design/Views.md §7](../design/Views.md#7-위젯)).
 
 ## 4. 지식 안 보기가 쓸 수 있는 칸
 
@@ -68,7 +73,7 @@
 | `cumulative` | 앞 행에 하나씩 더한 단계 표 |
 | `condition` · `where` | 측정 조건 · 원문 자리. 차트 밑글에 |
 
-차트를 고르는 시작점(**제안**, 정하지 않음). 2026-10-22 시험에서 열 종류로 고른 추천 차트가 사용자가 고를 차트와 다르지 않았다. 규칙은 보기 스펙에서 정한다.
+차트를 고르는 규칙은 이 시작점대로 [design/Views.md §6](../design/Views.md#6-차트-설정)에서 정했다. 2026-10-22 시험에서 열 종류로 고른 추천 차트가 사용자가 고를 차트와 다르지 않았다. 추천은 시작점일 뿐이고, 보기 앱에서 차트 종류를 바꿀 수 있다.
 
 | x 열 종류 | 그 밖 | 시작 차트 |
 | --- | --- | --- |
@@ -86,7 +91,6 @@
 
 ## 6. 정하지 않은 것
 
-- 보기 화면과 차트 추천 규칙(§3 · §4)
 - AI 제안 관계를 확인 · 고치는 화면
 - 여러 문서의 표 행을 모아 지식 사이 보기에서 비교하는 규칙
 - 보기 정보를 둘 곳(§5)
