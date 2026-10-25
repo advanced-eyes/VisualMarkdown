@@ -332,6 +332,7 @@ KnowledgeGraphView::KnowledgeGraphView(QWidget* parent)
     , m_vecLegendRows()
     , m_sizeLegend()
     , m_iUnplacedWidth(0)
+    , m_bLegendVisible(true)
     , m_dZoom(1)
     , m_ptOffset()
     , m_bAutoFit(true)
@@ -383,6 +384,51 @@ void KnowledgeGraphView::FitToView()
 void KnowledgeGraphView::ClearSelection()
 {
     SelectNode(-1);
+}
+
+void KnowledgeGraphView::SelectConcept(const QString& conceptId)
+{
+    // 시그널을 내지 않는다: 쓰는 쪽이 자기 고르기에 맞추려고 부르므로 되먹임을 막는다. 확대 · 옮김도 그대로 둔다
+    if (!conceptId.isEmpty())
+    {
+        // 배치 점(문서가 아닌 개념)
+        for (int iNode = 0; iNode < m_layout.vecNodes.size(); ++iNode)
+        {
+            const LayoutNode& node = m_layout.vecNodes[iNode];
+            if (node.bDocument || node.strId != conceptId)
+                continue;
+            if (m_iSelectedNode != iNode)
+                SelectNode(iNode);
+            return;
+        }
+        // 연도 없음 목록의 줄
+        const int iUnplaced = m_layout.vecUnplaced.indexOf(conceptId);
+        if (iUnplaced >= 0)
+        {
+            if (m_iSelectedUnplaced != iUnplaced)
+                SelectUnplaced(iUnplaced);
+            return;
+        }
+    }
+    // 빈 글 · 모르는 id · 문서 id
+    if (m_iSelectedNode >= 0 || m_iSelectedUnplaced >= 0 || !m_strSelectedId.isEmpty())
+        ClearSelection();
+}
+
+void KnowledgeGraphView::SetLegendVisible(bool visible)
+{
+    if (m_bLegendVisible == visible)
+        return;
+    m_bLegendVisible = visible;
+    // 사용자가 확대 · 옮기기 전이면 넓어지거나 좁아진 맞춤 영역에 다시 맞춘다. 아니면 확대 · 옮김을 두고 다시 그리기만 한다
+    if (m_bAutoFit)
+        ApplyFit();
+    update();
+}
+
+bool KnowledgeGraphView::IsLegendVisible() const
+{
+    return m_bLegendVisible;
 }
 
 QString KnowledgeGraphView::FindConceptAt(const QPoint& pos) const
@@ -557,7 +603,7 @@ QString KnowledgeGraphView::GetUnplacedTitle() const
 
 QRectF KnowledgeGraphView::GetLegendRect() const
 {
-    if (m_sizeLegend.isEmpty())
+    if (!m_bLegendVisible || m_sizeLegend.isEmpty())
         return QRectF();
     const int iSide = GetSideWidth();
     return QRectF(width() - kViewMargin - iSide, kViewMargin, iSide, m_sizeLegend.height());
@@ -953,6 +999,7 @@ void KnowledgeGraphView::HandleClick(const QPoint& pos)
     if (IsOnPanel(pos))
         return;   // 범례 · 목록의 빈 곳은 고른 것을 그대로 둔다
     ClearSelection();
+    emit SelectionCleared();   // 고른 것이 없었어도 낸다(쓰는 쪽이 위젯 밖에서 고른 것도 풀 수 있게)
 }
 
 void KnowledgeGraphView::CancelDrag()
@@ -1432,7 +1479,7 @@ QRectF KnowledgeGraphView::GetUnplacedPanelRect() const
 
 int KnowledgeGraphView::GetSideWidth() const
 {
-    int iWidth = m_sizeLegend.isEmpty() ? 0 : m_sizeLegend.width();
+    int iWidth = !m_bLegendVisible || m_sizeLegend.isEmpty() ? 0 : m_sizeLegend.width();
     if (!m_layout.vecUnplaced.isEmpty())
         iWidth = std::max(iWidth, m_iUnplacedWidth);
     return iWidth;

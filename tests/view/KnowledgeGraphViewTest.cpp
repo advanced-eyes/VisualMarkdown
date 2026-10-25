@@ -112,6 +112,14 @@ constexpr const char* kPercentDefinition = "정의 %1 · %2";
 constexpr const char* kPercentNote = "설명 %1 그리고 %2";
 constexpr int kPercentLinkWeight = 3;
 
+// 범례 판 끄기 · 밖에서 고르기 · 빈 곳 누르기(Ocean 이 쓰는 위젯 API L1–L3)
+constexpr int kPanelGap = 12;                   // 맞춤 영역과 오른쪽 판 사이 틈(px)
+constexpr double kFitTolerance = 0.01;          // 맞춤 영역 너비를 견줄 때의 여유(px)
+constexpr const char* kUnknownId = "no-such-concept";
+constexpr int kUnplacedPick = 2;                // 밖에서 고르는 연도 없음 줄
+constexpr int kLegendProbeStep = 4;             // 범례가 있던 자리에서 점이 없는 곳을 찾는 걸음(px)
+constexpr int kZoomIntoCorner = 6;              // 왼쪽 위 구석으로 휠을 이만큼 돌리면 점 대부분이 위젯 밖이다
+
 QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
 
 // 설명은 긴 줄을 빈칸에서 접으므로 견줄 때는 빈칸 · 줄바꿈을 모두 지운다
@@ -969,6 +977,407 @@ private slots:
         QCOMPARE(spyConcept.count(), 2);
         QCOMPARE(spyConcept.at(1).at(0).toString(), DecodeUtf8(kEgoFocusId));
         QCOMPARE(view.GetSelectedId(), DecodeUtf8(kEgoFocusId));
+    }
+
+    // L1: 범례 판을 끄면 판을 그리지 않고 GetLegendRect 가 빈 사각형이다. 연도 없음 판이 없는 보기는 맞춤 영역이 범례 폭 + 판 틈만큼 넓고,
+    // 맞춘 점 상자는 모두 위젯 · 맞춤 영역 안이다. 테마 · 그래프를 바꿔도 꺼진 채이고, 다시 켜면 처음 그림과 같다
+    void legendCanBeHidden_data() { layouts_data(); }
+    void legendCanBeHidden()
+    {
+        QFETCH(int, type);
+        const EGraphLayoutType eType = static_cast<EGraphLayoutType>(type);
+        const GraphLayoutOutput& layout = GetLayout(eType);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, eType);
+        QVERIFY(view.IsLegendVisible());   // 기본은 켜 있다
+        const QImage imageShown = ViewTestSupport::Render(view);
+        const QRectF rectLegend = view.GetLegendRect();
+        const QRectF rectFitShown = view.GetFitRect();
+        QVERIFY(!rectLegend.isEmpty());
+
+        view.SetLegendVisible(false);
+        QVERIFY(!view.IsLegendVisible());
+        QVERIFY2(view.GetLegendRect().isEmpty(), qUtf8Printable(ViewTestSupport::DescribeRect(view.GetLegendRect())));
+        const QRectF rectFit = view.GetFitRect();
+        QCOMPARE(rectFit.left(), rectFitShown.left());
+        QCOMPARE(rectFit.top(), rectFitShown.top());
+        QCOMPARE(rectFit.height(), rectFitShown.height());
+        if (layout.vecUnplaced.isEmpty())
+        {
+            QVERIFY2(std::abs(rectFit.width() - (rectFitShown.width() + rectLegend.width() + kPanelGap)) < kFitTolerance,
+                     qUtf8Printable(ViewTestSupport::DescribeRect(rectFit) + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectFitShown)
+                                    + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectLegend)));
+        }
+        else
+        {
+            // 오른쪽 판은 연도 없음 판이다: 맞춤 영역은 그 판 왼쪽에서 판 틈만큼 앞에서 끝난다
+            const QRectF rectItem = view.GetUnplacedItemRect(0);
+            QVERIFY(!rectItem.isEmpty());
+            QVERIFY(rectFit.width() >= rectFitShown.width());
+            QVERIFY2(rectFit.right() + kPanelGap <= rectItem.left(), qUtf8Printable(ViewTestSupport::DescribeRect(rectFit) + ViewTestSupport::DescribeRect(rectItem)));
+        }
+        const QImage imageHidden = ViewTestSupport::Render(view);
+        QVERIFY(imageHidden != imageShown);
+        QVERIFY(ViewTestSupport::HasEnoughInk(imageHidden, VisualMarkdownTheme::MakeLight().background));
+        QVERIFY(ViewTestSupport::SaveSnapshot(imageHidden, QStringLiteral("extra-graph-%1-nolegend-light").arg(ViewTestSupport::GetLayoutName(eType))));
+        const QRectF rectWidget(view.rect());
+        for (int iNode = 0; iNode < layout.vecNodes.size(); ++iNode)
+        {
+            const QRectF rectNode = view.GetNodeRect(iNode);
+            const QString strWhat = layout.vecNodes[iNode].strId + QLatin1Char(' ') + ViewTestSupport::DescribeRect(rectNode);
+            QVERIFY2(rectWidget.contains(rectNode), qUtf8Printable(strWhat));
+            QVERIFY2(rectFit.contains(rectNode), qUtf8Printable(strWhat + QStringLiteral(" fit ") + ViewTestSupport::DescribeRect(rectFit)));
+        }
+
+        // 테마 · 그래프를 바꿔도 꺼진 채다
+        view.SetTheme(VisualMarkdownTheme::MakeDark());
+        QVERIFY(!view.IsLegendVisible());
+        QVERIFY(view.GetLegendRect().isEmpty());
+        view.SetTheme(VisualMarkdownTheme::MakeLight());
+        view.SetGraph(m_graph, layout, eType);
+        QVERIFY(!view.IsLegendVisible());
+        QVERIFY(view.GetLegendRect().isEmpty());
+        QCOMPARE(ViewTestSupport::Render(view), imageHidden);
+
+        // 다시 켜면 처음 그림과 같다
+        view.SetLegendVisible(true);
+        QVERIFY(view.IsLegendVisible());
+        QCOMPARE(view.GetLegendRect(), rectLegend);
+        QCOMPARE(view.GetFitRect(), rectFitShown);
+        QCOMPARE(ViewTestSupport::Render(view), imageShown);
+    }
+
+    // L1: 사용자가 확대 · 옮긴 뒤에는 범례 판을 끄고 켜도 확대 · 옮김이 그대로다(다시 맞추지 않는다).
+    // 맞추면 넓어진 맞춤 영역을 쓰고, 그 뒤 범례 판을 켜면 다시 맞춰 점 상자가 판과 겹치지 않는다
+    void legendToggleKeepsUserZoom()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::NETWORK);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        ViewTestSupport::SendWheel(view, QPoint(500, 400), 2);
+        const double dZoom = view.GetZoom();
+        const QPointF ptNode = view.MapToWidget(layout.vecNodes[0].center);
+        view.SetLegendVisible(false);
+        QCOMPARE(view.GetZoom(), dZoom);
+        QCOMPARE(view.MapToWidget(layout.vecNodes[0].center), ptNode);
+        view.SetLegendVisible(true);
+        QCOMPARE(view.GetZoom(), dZoom);
+        QCOMPARE(view.MapToWidget(layout.vecNodes[0].center), ptNode);
+
+        view.SetLegendVisible(false);
+        view.FitToView();
+        const QRectF rectFit = view.GetFitRect();
+        for (int iNode = 0; iNode < layout.vecNodes.size(); ++iNode)
+            QVERIFY2(rectFit.contains(view.GetNodeRect(iNode)), qUtf8Printable(layout.vecNodes[iNode].strId));
+        view.SetLegendVisible(true);
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectLegend.isEmpty());
+        for (int iNode = 0; iNode < layout.vecNodes.size(); ++iNode)
+            QVERIFY2(!view.GetNodeRect(iNode).intersects(rectLegend), qUtf8Printable(layout.vecNodes[iNode].strId));
+    }
+
+    // L1: 타임라인은 범례 판을 꺼도 연도 없음 판이 그대로다(줄마다 찾기 · 누르기가 되고 맞춤 영역과 겹치지 않는다)
+    void legendHiddenKeepsUnplacedPanel()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::TIMELINE);
+        QCOMPARE(layout.vecUnplaced.size(), kUnplacedCount);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::TIMELINE);
+        view.SetLegendVisible(false);
+        QVERIFY(view.GetLegendRect().isEmpty());
+        QVERIFY(view.GetUnplacedTitle().startsWith(DecodeUtf8(kUnplacedTitle)));
+        const QRectF rectWidget(view.rect());
+        const QRectF rectFit = view.GetFitRect();
+        for (int iItem = 0; iItem < layout.vecUnplaced.size(); ++iItem)
+        {
+            const QRectF rectItem = view.GetUnplacedItemRect(iItem);
+            QVERIFY2(!rectItem.isEmpty() && rectWidget.contains(rectItem), qUtf8Printable(layout.vecUnplaced[iItem]));
+            QVERIFY2(!rectItem.intersects(rectFit), qUtf8Printable(layout.vecUnplaced[iItem]));
+            QCOMPARE(view.FindConceptAt(rectItem.center().toPoint()), layout.vecUnplaced[iItem]);
+        }
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.GetUnplacedItemRect(kUnplacedCount - 1).center().toPoint());
+        QCOMPARE(spyConcept.count(), 1);
+        QCOMPARE(spyConcept.at(0).at(0).toString(), layout.vecUnplaced.last());
+        QCOMPARE(view.GetSelectedId(), layout.vecUnplaced.last());
+        // 목록 판 안의 빈 곳(제목 줄): 고른 것을 그대로 두고 신호가 없다
+        const QRectF rectFirst = view.GetUnplacedItemRect(0);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, (rectFirst.center() - QPointF(0, rectFirst.height())).toPoint());
+        QCOMPARE(view.GetSelectedId(), layout.vecUnplaced.last());
+        QCOMPARE(spyCleared.count(), 0);
+        QCOMPARE(spyConcept.count(), 1);
+    }
+
+    // L2: 밖에서 개념을 고르면 그 점을 누른 것과 같은 그림이지만 신호를 내지 않는다. 같은 id 를 다시 고르면 그대로다.
+    // 확대 · 옮김은 바꾸지 않는다(점이 위젯 밖이어도 옮기지 않는다)
+    void selectConceptHighlightsWithoutSignal()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::NETWORK);
+        const int iNode = FindNode(layout, DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        KnowledgeGraphView clicked;
+        clicked.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        clicked.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        QTest::mouseClick(&clicked, Qt::LeftButton, Qt::NoModifier, clicked.MapToWidget(layout.vecNodes[iNode].center).toPoint());
+        QCOMPARE(clicked.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        const QImage imageClicked = ViewTestSupport::Render(clicked);
+
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyDocument(&view, &KnowledgeGraphView::DocumentActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        const double dZoom = view.GetZoom();
+        const QPointF ptNode = view.MapToWidget(layout.vecNodes[0].center);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetZoom(), dZoom);
+        QCOMPARE(view.MapToWidget(layout.vecNodes[0].center), ptNode);
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+
+        // 구석으로 확대한 뒤 다른 점을 골라도 확대 · 옮김은 그대로다
+        ViewTestSupport::SendWheel(view, QPoint(1, 1), kZoomIntoCorner);
+        const int iOther = FindNode(layout, DecodeUtf8(kMergedTo));
+        QVERIFY(iOther >= 0);
+        const double dCornerZoom = view.GetZoom();
+        const QPointF ptOther = view.MapToWidget(layout.vecNodes[iOther].center);
+        view.SelectConcept(DecodeUtf8(kMergedTo));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kMergedTo));
+        QCOMPARE(view.GetZoom(), dCornerZoom);
+        QCOMPARE(view.MapToWidget(layout.vecNodes[iOther].center), ptOther);
+
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyDocument.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // L2: 모르는 id · 빈 글자 · 문서 id(문서 ↔ 개념)를 고르면 고른 것을 지운다. 고르지 않은 그림과 같고 신호가 없다
+    void selectConceptUnknownClears()
+    {
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, GetLayout(EGraphLayoutType::NETWORK), EGraphLayoutType::NETWORK);
+        const QImage imageNone = ViewTestSupport::Render(view);
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyDocument(&view, &KnowledgeGraphView::DocumentActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        for (const QString& strId : { DecodeUtf8(kUnknownId), QString() })
+        {
+            view.SelectConcept(DecodeUtf8(kYolov2Id));
+            QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+            QVERIFY(ViewTestSupport::Render(view) != imageNone);
+            view.SelectConcept(strId);
+            QCOMPARE(view.GetSelectedId(), QString());
+            QCOMPARE(ViewTestSupport::Render(view), imageNone);
+        }
+
+        // 문서 ↔ 개념: 문서 id 는 개념이 아니라 지운다(문서를 눌러 고른 것도)
+        const GraphLayoutOutput& bipartite = GetLayout(EGraphLayoutType::BIPARTITE);
+        const int iDocument = FindDocumentNode(bipartite, DecodeUtf8(kYolo9000Title));
+        QVERIFY(iDocument >= 0);
+        const QString strDocumentId = bipartite.vecNodes[iDocument].strId;
+        KnowledgeGraphView documentView;
+        documentView.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        documentView.SetGraph(m_graph, bipartite, EGraphLayoutType::BIPARTITE);
+        const QImage imageDocumentNone = ViewTestSupport::Render(documentView);
+        QTest::mouseClick(&documentView, Qt::LeftButton, Qt::NoModifier, documentView.MapToWidget(bipartite.vecNodes[iDocument].center).toPoint());
+        QCOMPARE(documentView.GetSelectedId(), strDocumentId);
+        QSignalSpy spyDocumentConcept(&documentView, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyDocumentDocument(&documentView, &KnowledgeGraphView::DocumentActivated);
+        QSignalSpy spyDocumentCleared(&documentView, &KnowledgeGraphView::SelectionCleared);
+        documentView.SelectConcept(strDocumentId);
+        QCOMPARE(documentView.GetSelectedId(), QString());
+        QCOMPARE(ViewTestSupport::Render(documentView), imageDocumentNone);
+        documentView.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(documentView.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        documentView.SelectConcept(strDocumentId);
+        QCOMPARE(documentView.GetSelectedId(), QString());
+        QCOMPARE(ViewTestSupport::Render(documentView), imageDocumentNone);
+
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyDocument.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+        QCOMPARE(spyDocumentConcept.count(), 0);
+        QCOMPARE(spyDocumentDocument.count(), 0);
+        QCOMPARE(spyDocumentCleared.count(), 0);
+    }
+
+    // L2: 타임라인 연도 없음 목록의 id 를 고르면 그 줄을 누른 것과 같은 그림이다(신호 없음). 배치 점으로 옮겨 고를 수도 있다
+    void selectConceptPicksUnplacedRow()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::TIMELINE);
+        QVERIFY(layout.vecUnplaced.size() > kUnplacedPick);
+        const QString strUnplacedId = layout.vecUnplaced[kUnplacedPick];
+        KnowledgeGraphView clicked;
+        clicked.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        clicked.SetGraph(m_graph, layout, EGraphLayoutType::TIMELINE);
+        QTest::mouseClick(&clicked, Qt::LeftButton, Qt::NoModifier, clicked.GetUnplacedItemRect(kUnplacedPick).center().toPoint());
+        QCOMPARE(clicked.GetSelectedId(), strUnplacedId);
+        const QImage imageClicked = ViewTestSupport::Render(clicked);
+
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::TIMELINE);
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        view.SelectConcept(strUnplacedId);
+        QCOMPARE(view.GetSelectedId(), strUnplacedId);
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        view.SelectConcept(strUnplacedId);
+        QCOMPARE(view.GetSelectedId(), strUnplacedId);
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // L3: 빈 곳을 누르면 고른 것을 지운 뒤 SelectionCleared 를 낸다(받을 때 GetSelectedId 는 빈 글자). 고른 것이 없어도 낸다
+    void emptyClickEmitsSelectionCleared()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::NETWORK);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        QSignalSpy spyConcept(&view, &KnowledgeGraphView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        QStringList vecSelectedAtSignal;
+        connect(&view, &KnowledgeGraphView::SelectionCleared, this, [&view, &vecSelectedAtSignal]() { vecSelectedAtSignal << view.GetSelectedId(); });
+
+        const int iNode = FindNode(layout, DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.MapToWidget(layout.vecNodes[iNode].center).toPoint());
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(spyCleared.count(), 0);
+
+        const QPoint ptEmpty(2, view.height() - 3);
+        QCOMPARE(view.FindConceptAt(ptEmpty), QString());
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, ptEmpty);
+        QCOMPARE(spyCleared.count(), 1);
+        QCOMPARE(vecSelectedAtSignal, QStringList { QString() });
+        QCOMPARE(view.GetSelectedId(), QString());
+
+        // 고른 것이 없어도 낸다
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, ptEmpty);
+        QCOMPARE(spyCleared.count(), 2);
+        QCOMPARE(vecSelectedAtSignal, (QStringList { QString(), QString() }));
+        QCOMPARE(spyConcept.count(), 1);
+    }
+
+    // L3: 부르는 함수(ClearSelection · SelectConcept · SetGraph), 끌기, 범례 판 · 목록 판 안 누르기는 SelectionCleared 를 내지 않는다.
+    // 빈 곳 두 번 누르기(누름 · 놓음 · 두 번 누름 · 놓음)는 첫 누르기에서 한 번만 낸다
+    void selectionClearedOnlyForEmptyClicks()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::NETWORK);
+        const int iNode = FindNode(layout, DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.MapToWidget(layout.vecNodes[iNode].center).toPoint());
+        view.ClearSelection();
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        view.SelectConcept(DecodeUtf8(kUnknownId));
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        view.SelectConcept(QString());
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        QCOMPARE(view.GetSelectedId(), QString());
+        QCOMPARE(spyCleared.count(), 0);
+
+        // 빈 곳에서 끌기
+        const QPoint ptEmpty(2, view.height() - 3);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptEmpty, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseMove, ptEmpty + kDragDelta, Qt::NoButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptEmpty + kDragDelta, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(spyCleared.count(), 0);
+
+        // 범례 판 안 누르기: 고른 것을 그대로 둔다
+        view.FitToView();
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.MapToWidget(layout.vecNodes[iNode].center).toPoint());
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.GetLegendRect().center().toPoint());
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(spyCleared.count(), 0);
+
+        // 빈 곳 두 번 누르기: 첫 누르기에서 한 번
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptEmpty, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptEmpty, Qt::LeftButton, Qt::NoButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonDblClick, ptEmpty, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptEmpty, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(spyCleared.count(), 1);
+        QCOMPARE(view.GetSelectedId(), QString());
+
+        // 연도 없음 목록 판 안의 빈 곳(제목 줄)
+        KnowledgeGraphView timeline;
+        timeline.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        timeline.SetGraph(m_graph, GetLayout(EGraphLayoutType::TIMELINE), EGraphLayoutType::TIMELINE);
+        QSignalSpy spyTimelineCleared(&timeline, &KnowledgeGraphView::SelectionCleared);
+        const QRectF rectFirst = timeline.GetUnplacedItemRect(0);
+        QVERIFY(!rectFirst.isEmpty());
+        QTest::mouseClick(&timeline, Qt::LeftButton, Qt::NoModifier, (rectFirst.center() - QPointF(0, rectFirst.height())).toPoint());
+        QCOMPARE(spyTimelineCleared.count(), 0);
+    }
+
+    // L1 · L3: 범례 판을 끄면 범례가 있던 자리는 빈 곳이다. 누르면 고른 것을 지우고 SelectionCleared 를 한 번 낸다(켜 있을 때는 판 안이라
+    // 그대로다). 찾기 · 마우스 올림은 그 자리의 점도 찾는다(켜 있을 때는 판이 가린다)
+    void hiddenLegendAreaIsEmptySpace()
+    {
+        const GraphLayoutOutput& layout = GetLayout(EGraphLayoutType::NETWORK);
+        const int iNode = FindNode(layout, DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        const QRectF rectLegend = view.GetLegendRect();
+        QVERIFY(!rectLegend.isEmpty());
+        QSignalSpy spyCleared(&view, &KnowledgeGraphView::SelectionCleared);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, view.MapToWidget(layout.vecNodes[iNode].center).toPoint());
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, rectLegend.center().toPoint());
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(spyCleared.count(), 0);
+
+        view.SetLegendVisible(false);
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        // 다시 맞춘 뒤 범례가 있던 자리에서 점이 없는 곳
+        QPoint ptFree(-1, -1);
+        for (int iY = static_cast<int>(rectLegend.top()) + 1; iY < rectLegend.bottom() && ptFree.x() < 0; iY += kLegendProbeStep)
+            for (int iX = static_cast<int>(rectLegend.left()) + 1; iX < rectLegend.right() && ptFree.x() < 0; iX += kLegendProbeStep)
+                if (view.FindConceptAt(QPoint(iX, iY)).isEmpty() && view.FindDocumentAt(QPoint(iX, iY)).isEmpty())
+                    ptFree = QPoint(iX, iY);
+        QVERIFY(ptFree.x() >= 0);
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, ptFree);
+        QCOMPARE(spyCleared.count(), 1);
+        QCOMPARE(view.GetSelectedId(), QString());
+
+        // 점을 끌어 범례가 있던 자리 가운데로 옮긴다: 켜 있으면 찾지 않고, 끄면(확대 · 옮김은 그대로) 그 점을 찾는다
+        view.SetLegendVisible(true);
+        QCOMPARE(view.GetLegendRect(), rectLegend);
+        const QPoint ptTarget = rectLegend.center().toPoint();
+        const QPoint ptStart = view.MapToWidget(layout.vecNodes[iNode].center).toPoint();
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptStart, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseMove, ptTarget, Qt::NoButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptTarget, Qt::LeftButton, Qt::NoButton);
+        QVERIFY(view.GetNodeRect(iNode).contains(QPointF(ptTarget)));
+        QCOMPARE(view.FindConceptAt(ptTarget), QString());
+        QCOMPARE(view.GetToolTipAt(ptTarget), QString());
+        const double dZoom = view.GetZoom();
+        const QRectF rectNode = view.GetNodeRect(iNode);
+        view.SetLegendVisible(false);
+        QCOMPARE(view.GetZoom(), dZoom);
+        QCOMPARE(view.GetNodeRect(iNode), rectNode);
+        QCOMPARE(view.FindConceptAt(ptTarget), DecodeUtf8(kYolov2Id));
+        QVERIFY(view.GetToolTipAt(ptTarget).contains(DecodeUtf8(kYolov2Name)));
+        QCOMPARE(spyCleared.count(), 1);
     }
 
     // 빈 배치 · 맞지 않는 그래프도 죽지 않고 그린다

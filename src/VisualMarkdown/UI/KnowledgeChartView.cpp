@@ -406,6 +406,7 @@ KnowledgeChartView::KnowledgeChartView(QWidget* parent)
     : QWidget(parent)
     , m_spec()
     , m_theme(VisualMarkdownTheme::MakeLight())
+    , m_bHeaderVisible(true)
 {
     setAttribute(Qt::WA_OpaquePaintEvent);
 }
@@ -422,6 +423,19 @@ void KnowledgeChartView::SetTheme(const VisualMarkdownTheme& theme)
 {
     m_theme = theme;
     update();
+}
+
+void KnowledgeChartView::SetHeaderVisible(bool visible)
+{
+    if (m_bHeaderVisible == visible)
+        return;
+    m_bHeaderVisible = visible;
+    update();
+}
+
+bool KnowledgeChartView::IsHeaderVisible() const
+{
+    return m_bHeaderVisible;
 }
 
 QPair<int, int> KnowledgeChartView::FindPointAt(const QPoint& pos) const
@@ -566,13 +580,16 @@ void KnowledgeChartView::paintEvent(QPaintEvent* event)
     painter.fillRect(rect(), m_theme.background);
     const ChartGeometry geometry = ComputeGeometry();
 
-    // 제목 · 밑글
+    // 제목 · 밑글(제목 줄을 끄면 두 칸 모두 비었다)
     const QFont fontTitle = MakeFont(m_theme.iTitleFontPx, true);
     const QFont fontCaption = MakeFont(m_theme.iCaptionFontPx);
-    painter.setFont(fontTitle);
-    painter.setPen(m_theme.text);
-    painter.drawText(geometry.title, Qt::AlignLeft | Qt::AlignVCenter,
-                     QFontMetricsF(fontTitle).elidedText(m_spec.strTitle, Qt::ElideRight, geometry.title.width()));
+    if (!geometry.title.isEmpty())
+    {
+        painter.setFont(fontTitle);
+        painter.setPen(m_theme.text);
+        painter.drawText(geometry.title, Qt::AlignLeft | Qt::AlignVCenter,
+                         QFontMetricsF(fontTitle).elidedText(m_spec.strTitle, Qt::ElideRight, geometry.title.width()));
+    }
     if (!geometry.caption.isEmpty())
     {
         painter.setFont(fontCaption);
@@ -622,14 +639,18 @@ KnowledgeChartView::ChartGeometry KnowledgeChartView::ComputeGeometry() const
     const QFontMetricsF metricsTitle(MakeFont(m_theme.iTitleFontPx, true));
     const QFontMetricsF metricsCaption(MakeFont(m_theme.iCaptionFontPx));
     const QFontMetricsF metricsLabel(MakeFont(m_theme.iLabelFontPx));
-    geometry.title = QRectF(dLeft, dY, dRight - dLeft, metricsTitle.height());
-    dY = geometry.title.bottom() + kTitleGap;
-    if (!m_spec.strCaption.isEmpty())
+    // 제목 덩어리: 제목 줄(제목이 비어도 자리를 둔다) · 밑글 줄(밑글이 있을 때) · 아래 틈. 끄면 자리를 두지 않고 위 여백에서 바로 시작한다
+    if (m_bHeaderVisible)
     {
-        geometry.caption = QRectF(dLeft, dY, dRight - dLeft, metricsCaption.height());
-        dY = geometry.caption.bottom();
+        geometry.title = QRectF(dLeft, dY, dRight - dLeft, metricsTitle.height());
+        dY = geometry.title.bottom() + kTitleGap;
+        if (!m_spec.strCaption.isEmpty())
+        {
+            geometry.caption = QRectF(dLeft, dY, dRight - dLeft, metricsCaption.height());
+            dY = geometry.caption.bottom();
+        }
+        dY += kSectionGap;
     }
-    dY += kSectionGap;
 
     const double dBottomLimit = height() - kMargin;
     if (ShowsMessage())

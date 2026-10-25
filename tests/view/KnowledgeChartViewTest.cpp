@@ -5,6 +5,8 @@
 #include "VisualMarkdown/UI/VisualMarkdownTheme.h"
 #include "ViewTestSupport.h"
 
+#include <QFont>
+#include <QFontMetricsF>
 #include <QMap>
 #include <QPair>
 #include <QTest>
@@ -127,6 +129,43 @@ constexpr int kSyntheticPoints = 2;          // 합성 설정의 점 수(범주 
 constexpr const char* kPercentSeries = "계열 %1 이름 %2";
 constexpr const char* kPercentAxis = "축 %2";
 constexpr const char* kPercentCategory = "범주 %1";
+
+// 제목 · 밑글 줄 끄기(Ocean 이 쓰는 위젯 API L4): 위젯이 제목 덩어리에 두는 자리(KnowledgeChartView 와 같은 값)
+constexpr double kTopMargin = 20;           // 위 여백
+constexpr double kTitleGap = 4;             // 제목 줄과 밑글 줄 사이
+constexpr double kHeaderSectionGap = 14;    // 제목 덩어리와 그 아래(범례 · 그림 칸 · 까닭 글) 사이
+constexpr double kHeaderTolerance = 0.01;   // 자리를 견줄 때의 여유(px)
+constexpr double kGridTolerance = 1;        // 히트맵 칸 격자는 정수 화소에 맞추므로 그림 칸 위 끝은 이만큼(px) 다를 수 있다
+constexpr double kCardTolerance = 1;        // NONE 의 글 판 위 끝(화소로 찾는다)의 여유(px)
+
+// 위젯이 쓰는 글꼴: 위젯 글꼴에 테마의 글꼴 이름 · 글자 크기 · 굵기(위젯과 같게 만든다)
+QFont MakeViewFont(const QWidget& widget, const VisualMarkdownTheme& theme, int pixelSize, bool bold)
+{
+    QFont font = widget.font();
+    if (!theme.strFontFamily.isEmpty())
+        font.setFamily(theme.strFontFamily);
+    font.setPixelSize(std::max(1, pixelSize));
+    font.setBold(bold);
+    return font;
+}
+
+// 제목 덩어리 높이: 제목 줄 + 틈 + 밑글 줄(밑글이 있을 때) + 아래 틈
+double GetHeaderHeight(const QWidget& widget, const VisualMarkdownTheme& theme, const ChartSpec& spec)
+{
+    double dHeight = QFontMetricsF(MakeViewFont(widget, theme, theme.iTitleFontPx, true)).height() + kTitleGap;
+    if (!spec.strCaption.isEmpty())
+        dHeight += QFontMetricsF(MakeViewFont(widget, theme, theme.iCaptionFontPx, false)).height();
+    return dHeight + kHeaderSectionGap;
+}
+
+// 그림의 x 열에서 from 부터 아래로 처음 바탕 색이 아닌 점의 y. 없으면 -1
+int FindFirstInkRow(const QImage& image, int x, int from, const QColor& background)
+{
+    for (int iY = std::max(0, from); iY < image.height(); ++iY)
+        if (image.pixelColor(x, iY) != background)
+            return iY;
+    return -1;
+}
 
 // 막대 · 선 · 점을 하나씩 넣은 합성 설정(축 범위만 바꿔 시험한다)
 ChartSpec MakeSyntheticSpec(EChartType type, double yMin, double yMax, double value)
@@ -1453,6 +1492,147 @@ private slots:
         ViewTestSupport::Render(view);
         view.FindPointAt(QPoint(20, 15));
         view.GetToolTipAt(QPoint(20, 15));
+    }
+
+    // L4: 제목 · 밑글 줄을 끄면 그 자리를 두지 않는다. 그림 칸(히트맵은 색 범례, 여러 계열은 범례, NONE 은 까닭 글 자리)이 켠 때보다
+    // 제목 덩어리 높이만큼 위에서 시작한다(범례 · 히트맵 색 범례 · 도넛은 위 여백 바로 아래). 설정에 제목 · 밑글이 있어도 그리지 않아
+    // 제목 · 밑글을 지운 설정과 같은 그림이다. GetSpec 은 받은 그대로다. 다시 켜면 처음 그림과 같다
+    void headerCanBeHidden_data()
+    {
+        QTest::addColumn<int>("chart");
+        QTest::newRow("bar") << kVocDetectorsChart;
+        QTest::newRow("grouped bar") << kTrainTestChart;
+        QTest::newRow("heatmap") << kHeatmapChart;
+        QTest::newRow("donut") << kPaymentChart;
+        QTest::newRow("none") << kPriorityChart;
+    }
+    void headerCanBeHidden()
+    {
+        QFETCH(int, chart);
+        const ChartSpec& spec = m_vecSpecs[chart];
+        QVERIFY(!spec.strTitle.isEmpty());
+        const VisualMarkdownTheme theme = VisualMarkdownTheme::MakeLight();
+        KnowledgeChartView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetTheme(theme);
+        view.SetSpec(spec);
+        QVERIFY(view.IsHeaderVisible());   // 기본은 켜 있다
+        const double dHeader = GetHeaderHeight(view, theme, spec);
+        const QImage imageShown = ViewTestSupport::Render(view);
+        const QRectF rectPlotShown = view.GetPlotRect();
+        const QRectF rectLegendShown = view.GetLegendRect();
+        const QString strMessageShown = view.GetMessageText();
+        const int iCardX = view.width() / 2;   // NONE 의 글 판은 가로 가운데다(제목 · 밑글은 왼쪽 맞춤이라 닿지 않는다)
+        const int iBelowHeader = static_cast<int>(std::ceil(kTopMargin + dHeader));
+        const int iCardShown = FindFirstInkRow(imageShown, iCardX, iBelowHeader, theme.background);
+
+        view.SetHeaderVisible(false);
+        QVERIFY(!view.IsHeaderVisible());
+        const QImage imageHidden = ViewTestSupport::Render(view);
+        QVERIFY(imageHidden != imageShown);
+        QVERIFY(ViewTestSupport::HasEnoughInk(imageHidden, theme.background));
+        const QString strName = QStringLiteral("extra-chart-%1-%2-noheader-light").arg(chart + 1, 2, 10, QLatin1Char('0')).arg(GetTypeName(spec.eType));
+        QVERIFY2(ViewTestSupport::SaveSnapshot(imageHidden, strName), qPrintable(strName));
+        const QRectF rectPlot = view.GetPlotRect();
+        const QRectF rectLegend = view.GetLegendRect();
+        QCOMPARE(view.GetMessageText(), strMessageShown);
+        if (spec.eType == EChartType::NONE)
+        {
+            // 까닭 글 판은 까닭 글 자리(위 여백 아래부터 위젯 아래까지)의 가운데라, 자리가 제목 덩어리만큼 위로 늘면 판은 그 반만큼 올라간다
+            QVERIFY(rectPlot.isEmpty());
+            QVERIFY(!strMessageShown.isEmpty());
+            const int iCardHidden = FindFirstInkRow(imageHidden, iCardX, iBelowHeader, theme.background);
+            QVERIFY(iCardShown > 0 && iCardHidden > 0);
+            QVERIFY2(std::abs((iCardShown - iCardHidden) - dHeader / 2) <= kCardTolerance,
+                     qPrintable(QStringLiteral("%1 → %2, header %3").arg(iCardShown).arg(iCardHidden).arg(dHeader)));
+            // 위 여백 아래 띠(제목 줄 자리)에 잉크가 없다
+            const QRect rectBand(0, static_cast<int>(kTopMargin), view.width(), static_cast<int>(dHeader));
+            QCOMPARE(ViewTestSupport::CountInk(imageHidden.copy(rectBand), theme.background), 0);
+            QVERIFY(ViewTestSupport::CountInk(imageShown.copy(rectBand), theme.background) > 0);
+        }
+        else
+        {
+            QVERIFY(!rectPlot.isEmpty());
+            const double dPlotTolerance = spec.eType == EChartType::HEATMAP ? kGridTolerance : kHeaderTolerance;
+            QVERIFY2(std::abs((rectPlotShown.top() - rectPlot.top()) - dHeader) <= dPlotTolerance,
+                     qUtf8Printable(ViewTestSupport::DescribeRect(rectPlotShown) + ViewTestSupport::DescribeRect(rectPlot) + QString::number(dHeader)));
+            QCOMPARE(rectLegend.isEmpty(), rectLegendShown.isEmpty());
+            if (!rectLegend.isEmpty())
+                QVERIFY2(std::abs((rectLegendShown.top() - rectLegend.top()) - dHeader) < kHeaderTolerance,
+                         qUtf8Printable(ViewTestSupport::DescribeRect(rectLegendShown) + ViewTestSupport::DescribeRect(rectLegend)));
+            // 맨 위 덩어리(범례 · 히트맵 색 범례 · 도넛 고리)는 위 여백 바로 아래에서 시작한다. 계열 하나인 막대는 y 축 이름 줄이 맨 위다
+            const double dTop = rectLegend.isEmpty() ? rectPlot.top() : std::min(rectPlot.top(), rectLegend.top());
+            if (spec.eType != EChartType::BAR || !rectLegend.isEmpty())
+                QVERIFY2(std::abs(dTop - kTopMargin) < kHeaderTolerance, qPrintable(QString::number(dTop)));
+        }
+        QCOMPARE(view.GetSpec().strTitle, spec.strTitle);
+        QCOMPARE(view.GetSpec().strCaption, spec.strCaption);
+
+        // 제목 · 밑글을 그리지 않는다: 제목 · 밑글을 지운 설정과 같은 그림이다(켜면 제목이 있는 그림과 다르다)
+        ChartSpec blank = spec;
+        blank.strTitle.clear();
+        blank.strCaption.clear();
+        KnowledgeChartView blankView;
+        blankView.resize(view.size());
+        blankView.SetTheme(theme);
+        blankView.SetSpec(blank);
+        QVERIFY(ViewTestSupport::Render(blankView) != imageShown);
+        blankView.SetHeaderVisible(false);
+        QCOMPARE(ViewTestSupport::Render(blankView), imageHidden);
+
+        // 다시 켜면 처음 그림과 같다
+        view.SetHeaderVisible(true);
+        QVERIFY(view.IsHeaderVisible());
+        QCOMPARE(view.GetPlotRect(), rectPlotShown);
+        QCOMPARE(view.GetLegendRect(), rectLegendShown);
+        QCOMPARE(ViewTestSupport::Render(view), imageShown);
+    }
+
+    // L4: 제목 · 밑글 줄을 끈 상태에서도 표시 가운데에서 그 점을 찾고, 그 설명은 켠 때와 같은 글이다(그리는 표 12개 모두)
+    void headerHiddenKeepsToolTips()
+    {
+        for (int iChart = 0; iChart < m_vecSpecs.size(); ++iChart)
+        {
+            const ChartSpec& spec = m_vecSpecs[iChart];
+            if (spec.eType == EChartType::NONE)
+                continue;
+            KnowledgeChartView view;
+            view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+            view.SetSpec(spec);
+            QVector<QVector<QString>> vecTips;
+            QVector<QVector<QRectF>> vecMarks;
+            for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
+            {
+                vecTips << QVector<QString>();
+                vecMarks << QVector<QRectF>();
+                for (int iPoint = 0; iPoint < spec.vecSeries[iSeries].vecPoints.size(); ++iPoint)
+                {
+                    const QRectF rectMark = view.GetMarkRect(iSeries, iPoint);
+                    vecMarks.last() << rectMark;
+                    vecTips.last() << (rectMark.isEmpty() ? QString() : view.GetToolTipAt(rectMark.center().toPoint()));
+                }
+            }
+            view.SetHeaderVisible(false);
+            int iMoved = 0;
+            for (int iSeries = 0; iSeries < spec.vecSeries.size(); ++iSeries)
+            {
+                for (int iPoint = 0; iPoint < spec.vecSeries[iSeries].vecPoints.size(); ++iPoint)
+                {
+                    const QRectF rectMark = view.GetMarkRect(iSeries, iPoint);
+                    const QString strWhat = spec.strTitle + QLatin1Char('/') + spec.vecSeries[iSeries].strName + QLatin1Char('/')
+                                            + spec.vecSeries[iSeries].vecPoints[iPoint].strLabel;
+                    QVERIFY2(rectMark.isEmpty() == vecMarks[iSeries][iPoint].isEmpty(), qUtf8Printable(strWhat));
+                    if (rectMark.isEmpty())
+                        continue;
+                    if (rectMark.center() != vecMarks[iSeries][iPoint].center())
+                        ++iMoved;
+                    QVERIFY2(!vecTips[iSeries][iPoint].isEmpty(), qUtf8Printable(strWhat));
+                    QCOMPARE(view.FindPointAt(rectMark.center().toPoint()), qMakePair(iSeries, iPoint));
+                    QCOMPARE(view.GetToolTipAt(rectMark.center().toPoint()), vecTips[iSeries][iPoint]);
+                }
+            }
+            QVERIFY2(iMoved > 0, qUtf8Printable(spec.strTitle));
+        }
     }
 
 private:

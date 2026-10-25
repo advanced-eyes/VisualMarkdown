@@ -36,6 +36,12 @@ public:
     void SetTheme(const VisualMarkdownTheme& theme);
     void FitToView();        // 그림 전체가 위젯(범례 판 왼쪽)에 들어오게 확대와 옮김을 정한다
     void ClearSelection();
+    // 밖에서 개념을 고른다: 그 개념 점(또는 연도 없음 목록 줄)을 누른 것과 같이 고르되 시그널을 내지 않는다.
+    // 빈 글 · 모르는 id · 문서 id 면 고른 것을 지운다. 이미 고른 id 면 그대로 둔다. 확대 · 옮김은 바꾸지 않는다
+    void SelectConcept(const QString& conceptId);
+    // 범례 판을 그릴지(기본 참). 거짓이면 판 자리를 맞춤 영역에 돌린다(연도 없음 목록 판은 그대로). SetTheme · SetGraph 는 이 값을 바꾸지 않는다
+    void SetLegendVisible(bool visible);
+    bool IsLegendVisible() const;
 
 public:
     // 위치로 찾기(위젯 좌표). 보기 앱과 시험이 쓴다
@@ -62,6 +68,9 @@ public:
 signals:
     void ConceptActivated(const QString& conceptId);
     void DocumentActivated(const QString& documentId);
+    // 사용자가 빈 곳(점 · 연도 없음 목록 줄 · 범례 판 · 목록 판 밖)을 눌러(끌기가 아닌 누르기) 고른 것을 지운 뒤 낸다. 고른 것이 없었어도 낸다.
+    // ClearSelection · SelectConcept · SetGraph 로 지울 때는 내지 않는다
+    void SelectionCleared();
 
 protected:
     bool event(QEvent* event) override;                 // QEvent::ToolTip: 마우스 올림 설명
@@ -143,6 +152,7 @@ private:
     QVector<LegendRow> m_vecLegendRows;
     QSize m_sizeLegend;
     int m_iUnplacedWidth;
+    bool m_bLegendVisible;                 // 범례 판을 그릴지(SetLegendVisible)
 
     double m_dZoom;
     QPointF m_ptOffset;
