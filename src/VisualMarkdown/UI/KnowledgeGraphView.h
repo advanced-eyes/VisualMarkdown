@@ -34,14 +34,13 @@ public:
     // 그래프는 점 정보(이름 · 종류 · 연도 · 정의 · 문서 수)와 선 정보(상태 · 출처 · 설명)를 찾는 데 쓴다. 고른 것은 지운다
     void SetGraph(const KnowledgeGraph& graph, const GraphLayoutOutput& layout, EGraphLayoutType type);
     void SetTheme(const VisualMarkdownTheme& theme);
-    void FitToView();        // 그림 전체가 위젯(범례 판 왼쪽)에 들어오게 확대와 옮김을 정한다
+    void FitToView();        // 그림 전체가 위젯(오른쪽 판 왼쪽)에 들어오게 확대와 옮김을 정한다
     void ClearSelection();
     // 밖에서 개념을 고른다: 그 개념 점(또는 연도 없음 목록 줄)을 누른 것과 같이 고르되 시그널을 내지 않는다.
     // 빈 글 · 모르는 id · 문서 id 면 고른 것을 지운다. 이미 고른 id 면 그대로 둔다. 확대 · 옮김은 바꾸지 않는다
     void SelectConcept(const QString& conceptId);
     // 범례 판을 그릴지(기본 참). 거짓이면 판 자리를 맞춤 영역에 돌린다(연도 없음 목록 판은 그대로). SetTheme · SetGraph 는 이 값을 바꾸지 않는다
     void SetLegendVisible(bool visible);
-    bool IsLegendVisible() const;
 
 public:
     // 위치로 찾기(위젯 좌표). 보기 앱과 시험이 쓴다
@@ -56,7 +55,7 @@ public:
     QRectF GetLaneLabelRect(int lane) const;            // 갈래 이름을 쓰는 칸(점 상자 왼쪽 여백)
     QRectF GetUnplacedItemRect(int index) const;        // 연도 없음 목록의 줄(vecUnplaced 자리). 보이지 않으면 빈 사각형
     QString GetUnplacedTitle() const;                   // 연도 없음 목록의 제목("연도 없음 (n)"). 목록이 없으면 빈 글
-    QRectF GetLegendRect() const;                       // 범례 판. 그릴 것이 없으면 빈 사각형
+    QRectF GetLegendRect() const;                       // 범례 판. 그릴 것이 없거나 범례 판을 끄면 빈 사각형
     QRectF GetFitRect() const;                          // 맞춤 영역: 위젯에서 여백 · 오른쪽 판 · 갈래 이름 칸 · 연도 머리를 뺀 칸
     QPolygonF GetEdgeLine(int edge) const;              // 그린 선의 꺾은선(위젯 좌표, 히트 테스트도 이 경로를 쓴다). 그리지 않는 선이면 비었다
     QPolygonF GetEdgeArrow(int edge) const;             // 화살촉 세모(첫 점이 촉 끝). 방향 없는 선 · 그리지 않는 선이면 비었다
@@ -64,6 +63,7 @@ public:
 public:
     QString GetSelectedId() const;                      // 고른 개념 · 문서 id. 없으면 빈 글
     double GetZoom() const;
+    bool IsLegendVisible() const;
 
 signals:
     void ConceptActivated(const QString& conceptId);

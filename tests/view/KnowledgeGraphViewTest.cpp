@@ -113,9 +113,9 @@ constexpr const char* kPercentNote = "설명 %1 그리고 %2";
 constexpr int kPercentLinkWeight = 3;
 
 // 범례 판 끄기 · 밖에서 고르기 · 빈 곳 누르기(Ocean 이 쓰는 위젯 API L1–L3)
-constexpr int kPanelGap = 12;                   // 맞춤 영역과 오른쪽 판 사이 틈(px)
+constexpr int kPanelGap = 12;                   // 맞춤 영역과 오른쪽 판 사이 틈(px, KnowledgeGraphView 와 같은 값)
 constexpr double kFitTolerance = 0.01;          // 맞춤 영역 너비를 견줄 때의 여유(px)
-constexpr const char* kUnknownId = "no-such-concept";
+constexpr const char* kUnknownId = "no-such-concept";   // 어느 배치에도 없는 개념 id
 constexpr int kUnplacedPick = 2;                // 밖에서 고르는 연도 없음 줄
 constexpr int kLegendProbeStep = 4;             // 범례가 있던 자리에서 점이 없는 곳을 찾는 걸음(px)
 constexpr int kZoomIntoCorner = 6;              // 왼쪽 위 구석으로 휠을 이만큼 돌리면 점 대부분이 위젯 밖이다
@@ -1359,7 +1359,7 @@ private slots:
         QCOMPARE(spyCleared.count(), 1);
         QCOMPARE(view.GetSelectedId(), QString());
 
-        // 점을 끌어 범례가 있던 자리 가운데로 옮긴다: 켜 있으면 찾지 않고, 끄면(확대 · 옮김은 그대로) 그 점을 찾는다
+        // 그 점에서 그림을 끌어 점을 범례가 있던 자리 가운데로 옮긴다: 켜 있으면 찾지 않고, 끄면(확대 · 옮김은 그대로) 그 점을 찾는다
         view.SetLegendVisible(true);
         QCOMPARE(view.GetLegendRect(), rectLegend);
         const QPoint ptTarget = rectLegend.center().toPoint();

@@ -433,11 +433,6 @@ void KnowledgeChartView::SetHeaderVisible(bool visible)
     update();
 }
 
-bool KnowledgeChartView::IsHeaderVisible() const
-{
-    return m_bHeaderVisible;
-}
-
 QPair<int, int> KnowledgeChartView::FindPointAt(const QPoint& pos) const
 {
     const ChartGeometry geometry = ComputeGeometry();
@@ -558,6 +553,11 @@ QString KnowledgeChartView::GetMessageText() const
 const ChartSpec& KnowledgeChartView::GetSpec() const
 {
     return m_spec;
+}
+
+bool KnowledgeChartView::IsHeaderVisible() const
+{
+    return m_bHeaderVisible;
 }
 
 bool KnowledgeChartView::event(QEvent* event)

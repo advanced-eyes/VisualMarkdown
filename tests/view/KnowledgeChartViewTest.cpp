@@ -137,16 +137,18 @@ constexpr double kHeaderSectionGap = 14;    // 제목 덩어리와 그 아래(�
 constexpr double kHeaderTolerance = 0.01;   // 자리를 견줄 때의 여유(px)
 constexpr double kGridTolerance = 1;        // 히트맵 칸 격자는 정수 화소에 맞추므로 그림 칸 위 끝은 이만큼(px) 다를 수 있다
 constexpr double kCardTolerance = 1;        // NONE 의 글 판 위 끝(화소로 찾는다)의 여유(px)
+constexpr int kMinPixelSize = 1;            // 글자 크기(px)의 아래 한계(ViewCommon 과 같은 값)
 
-// 위젯이 쓰는 글꼴: 위젯 글꼴에 테마의 글꼴 이름 · 글자 크기 · 굵기(위젯과 같게 만든다)
+// 위젯이 쓰는 글꼴: 위젯 글꼴에 테마의 글꼴 이름 · 글자 크기 · 굵기. ViewCommon::MakeFont 와 같게 만든다
+// (ViewCommon 은 위젯 .cpp 만 쓰는 머리글이라 시험이 따로 둔다)
 QFont MakeViewFont(const QWidget& widget, const VisualMarkdownTheme& theme, int pixelSize, bool bold)
 {
-    QFont font = widget.font();
+    QFont fontResult = widget.font();
     if (!theme.strFontFamily.isEmpty())
-        font.setFamily(theme.strFontFamily);
-    font.setPixelSize(std::max(1, pixelSize));
-    font.setBold(bold);
-    return font;
+        fontResult.setFamily(theme.strFontFamily);
+    fontResult.setPixelSize(std::max(kMinPixelSize, pixelSize));
+    fontResult.setBold(bold);
+    return fontResult;
 }
 
 // 제목 덩어리 높이: 제목 줄 + 틈 + 밑글 줄(밑글이 있을 때) + 아래 틈

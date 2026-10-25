@@ -34,7 +34,6 @@ public:
     // 제목 · 밑글 줄을 그릴지(기본 참). 거짓이면 설정에 제목 · 밑글이 있어도 그 자리를 두지 않고, 그 아래 것(범례 · 그림 칸 · NONE 의 까닭 글)이
     // 위 여백에서 바로 시작한다. GetSpec 은 받은 그대로다
     void SetHeaderVisible(bool visible);
-    bool IsHeaderVisible() const;
 
 public:
     // 위치로 찾기(위젯 좌표). 보기 앱과 시험이 쓴다
@@ -51,6 +50,7 @@ public:
 
 public:
     const ChartSpec& GetSpec() const;
+    bool IsHeaderVisible() const;
 
 protected:
     bool event(QEvent* event) override;                     // QEvent::ToolTip: 마우스 올림 설명

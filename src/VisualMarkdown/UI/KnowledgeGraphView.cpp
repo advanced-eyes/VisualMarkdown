@@ -426,11 +426,6 @@ void KnowledgeGraphView::SetLegendVisible(bool visible)
     update();
 }
 
-bool KnowledgeGraphView::IsLegendVisible() const
-{
-    return m_bLegendVisible;
-}
-
 QString KnowledgeGraphView::FindConceptAt(const QPoint& pos) const
 {
     const int iNode = FindNodeAt(pos);
@@ -643,6 +638,11 @@ QString KnowledgeGraphView::GetSelectedId() const
 double KnowledgeGraphView::GetZoom() const
 {
     return m_dZoom;
+}
+
+bool KnowledgeGraphView::IsLegendVisible() const
+{
+    return m_bLegendVisible;
 }
 
 bool KnowledgeGraphView::event(QEvent* event)

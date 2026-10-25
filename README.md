@@ -227,7 +227,7 @@ Ocean/
 | 5 | 3층 보기 모델(그래프 배치 6가지 · 차트 설정)과 2층 읽기 색인 `KnowledgeIndex`([design/Views.md](design/Views.md) §4–§6) | showcase 기대값 시험 통과 — 끝(`VisualMarkdownTests` 10개 클래스 245개) |
 | 6 | 4층 위젯(별도 타깃 `VisualMarkdownView`)과 보기 앱 `VisualMarkdownViewer`(§3.1, design/Views.md §7 · §8) | 위젯 · 보기 앱 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownViewTests` 4개 클래스 128개, `VisualMarkdownViewerTests` 4개 클래스 53개, ctest 5개) |
 | 7 | 보기 더하기([design/MoreViews.md](design/MoreViews.md)): 더할 그래프를 조사해 고른 셋 — 히트맵 · 도넛(지식 안), 이웃(지식 사이). showcase 에 YOLOv3 표 3 을 더했다 | 셋마다 구현 → 리뷰, 시험 통과, 스냅샷을 눈으로 확인 — 끝(`VisualMarkdownTests` 10개 클래스 271개, `VisualMarkdownViewTests` 4개 175개, `VisualMarkdownViewerTests` 4개 57개, ctest 5개, 스냅샷 PNG 20장) |
-| 8 | Ocean 학습 R3 이 쓰는 위젯 API(L1–L4): 범례 판 끄기 · 밖에서 개념 고르기 · 빈 곳 누르기 신호 · 차트 머리 끄기([design/Views.md](design/Views.md) §7). 보기 · 차트 종류 · 보기가 읽는 칸은 그대로다(§9 의 showcase 규칙에 들지 않는다) | 넷 모두 기본값이 지금 동작, 위젯 시험 통과, 보기 앱 스냅샷(PNG 20장 · `snapshot.tsv`)이 고치기 전과 바이트로 같음 — 끝(`VisualMarkdownTests` 10개 클래스 271개, `VisualMarkdownViewTests` 4개 195개, `VisualMarkdownViewerTests` 4개 57개, ctest 5개) |
+| 8 | Ocean 학습 R3 이 쓰는 위젯 API(L1–L4): 범례 판 끄기 · 밖에서 개념 고르기 · 빈 곳 누르기 신호 · 차트 제목 줄 끄기([design/Views.md](design/Views.md) §7). 보기 · 차트 종류 · 보기가 읽는 칸은 그대로다(§9 의 showcase 규칙에 들지 않는다) | 구현 → 리뷰, 넷 모두 기본값이 지금 동작, 위젯 시험 통과, 보기 앱 스냅샷(PNG 20장 · `snapshot.tsv`)이 고치기 전과 바이트로 같음 — 끝(`VisualMarkdownTests` 10개 클래스 271개, `VisualMarkdownViewTests` 4개 195개, `VisualMarkdownViewerTests` 4개 57개, ctest 5개) |
 
 - 서브모듈 붙이기(3)를 `KnowledgeBase` 나누기(4)보다 먼저 한다. Ocean 어댑터가 라이브러리의 `UpsertConcept` · `SaveDocument` 를 부르려면 라이브러리가 먼저 붙어 있어야 한다. 단계마다 두 쪽 테스트가 모두 통과한 채로 끝난다.
 - 보기(5 · 6단계)는 4단계보다 먼저 했다. 보기는 읽기만 쓰므로 저장 API 를 기다리지 않는다. 읽기 색인 `KnowledgeIndex` 는 5단계에서 만들었다(§5.3).
