@@ -7,6 +7,7 @@
 
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSignalSpy>
 #include <QTest>
 
 #include <memory>
@@ -43,7 +44,55 @@ constexpr const char* kPercentRow = "가 %1 %2";
 constexpr const char* kPercentColumn = "나 %2";
 constexpr double kRowLabelOffset = 10;   // 행 이름표: 칸 왼쪽으로 이만큼(px) 들어간 자리
 
+// 고르기(L7): showcase 행렬의 두 개념, 어느 행렬에도 없는 id, 행 이름표를 누르는 자리(칸 왼쪽으로 이만큼), 끌기 거리(같은 이름표 안에 머문다)
+constexpr const char* kFasterRcnnId = "faster-r-cnn";
+constexpr const char* kFasterRcnnName = "Faster R-CNN";
+constexpr const char* kYolov2Id = "yolov2";
+constexpr const char* kYolov2Name = "YOLOv2";
+constexpr const char* kUnknownId = "no-such-concept";
+constexpr double kRowLabelInset = 20;
+const QPoint kDragDelta(12, 0);
+
 QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
+
+void Click(QWidget& widget, const QPoint& pos) { QTest::mouseClick(&widget, Qt::LeftButton, Qt::NoModifier, pos); }
+
+// 행 이름표 안의 자리: 그 행 첫 칸 왼쪽으로 kRowLabelInset 만큼
+QPoint GetRowLabelPoint(const KnowledgeMatrixView& view, int row)
+{
+    const QRectF rectCell = view.GetCellRect(row, 0);
+    return QPointF(rectCell.left() - kRowLabelInset, rectCell.center().y()).toPoint();
+}
+
+// 열 이름표 맞힘 칸(기울인 네모)의 가운데
+QPoint GetColumnLabelPoint(const KnowledgeMatrixView& view, int column)
+{
+    const QPolygonF area = view.GetColumnLabelArea(column);
+    return (((area[0] + area[3]) / 2 + (area[1] + area[2]) / 2) / 2).toPoint();
+}
+
+// 행 · 열 띠(칸 영역 안, 가장자리 1px 여유)
+QRect GetRowBand(const KnowledgeMatrixView& view, int row)
+{
+    return QRectF(view.GetCellRect(row, 0).topLeft(), view.GetCellRect(row, kOrder - 1).bottomRight()).toAlignedRect().adjusted(-1, -1, 1, 1);
+}
+
+QRect GetColumnBand(const KnowledgeMatrixView& view, int column)
+{
+    return QRectF(view.GetCellRect(0, column).topLeft(), view.GetCellRect(kOrder - 1, column).bottomRight()).toAlignedRect().adjusted(-1, -1, 1, 1);
+}
+
+// 칸 영역 안에서 두 띠 밖의 점 가운데 두 그림이 다른 점 수
+int CountChangesOutsideBands(const QImage& before, const QImage& after, const QRect& grid, const QRect& rowBand, const QRect& columnBand)
+{
+    int iChanged = 0;
+    const QRect rectInside = grid.intersected(before.rect());
+    for (int iY = rectInside.top(); iY <= rectInside.bottom(); ++iY)
+        for (int iX = rectInside.left(); iX <= rectInside.right(); ++iX)
+            if (!rowBand.contains(iX, iY) && !columnBand.contains(iX, iY) && before.pixel(iX, iY) != after.pixel(iX, iY))
+                ++iChanged;
+    return iChanged;
+}
 }
 
 // 관계 행렬 위젯(KnowledgeMatrixView, design/Views.md §7)을 showcase 행렬 배치로 시험한다(offscreen).
@@ -359,6 +408,365 @@ private slots:
         QVERIFY(ViewTestSupport::HasEnoughInk(ViewTestSupport::Render(view), VisualMarkdownTheme::MakeLight().background));
         for (const LayoutMatrixCell& cell : m_layout.vecCells)
             view.GetToolTipAt(view.GetCellRect(cell.iRow, cell.iColumn).center().toPoint());
+    }
+
+    // L7a: 행 이름표("Faster R-CNN")를 누르면 그 개념을 고르고 ConceptActivated 를 한 번 낸다. 그 행 · 열 띠와 이름표 그림이 바뀌고,
+    // 띠 밖의 칸은 그대로다(흐리지 않는다). 마우스 올림 글은 그대로다. 이미 고른 개념을 다시 누르면 또 낸다
+    void rowLabelClickActivates()
+    {
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const int iRow = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId));
+        QVERIFY(iRow >= 0);
+        const QPoint ptLabel = GetRowLabelPoint(view, iRow);
+        QCOMPARE(view.FindCellAt(ptLabel), qMakePair(-1, -1));
+        const QString strTip = view.GetToolTipAt(ptLabel);
+        QVERIFY2(strTip.contains(DecodeUtf8(kFasterRcnnName)), qUtf8Printable(strTip));
+        QCOMPARE(view.GetSelectedId(), QString());
+        const QImage imageBefore = ViewTestSupport::Render(view);
+
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        Click(view, ptLabel);
+        QCOMPARE(spyConcept.count(), 1);
+        QCOMPARE(spyConcept.at(0).at(0).toString(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(spyCleared.count(), 0);
+        QCOMPARE(view.GetToolTipAt(ptLabel), strTip);
+
+        const QImage imageAfter = ViewTestSupport::Render(view);
+        const QRect rectRowBand = GetRowBand(view, iRow);
+        const QRect rectColumnBand = GetColumnBand(view, iRow);
+        QVERIFY(imageAfter.copy(rectRowBand) != imageBefore.copy(rectRowBand));
+        QVERIFY(imageAfter.copy(rectColumnBand) != imageBefore.copy(rectColumnBand));
+        const QRectF rectCell = view.GetCellRect(iRow, 0);
+        const QRect rectRowLabel = QRectF(0, rectCell.top(), rectCell.left(), rectCell.height()).toAlignedRect();
+        QVERIFY(imageAfter.copy(rectRowLabel) != imageBefore.copy(rectRowLabel));   // 이름표 글자(굵게)
+        QCOMPARE(CountChangesOutsideBands(imageBefore, imageAfter, view.GetGridRect().toAlignedRect(), rectRowBand, rectColumnBand), 0);
+        // 띠는 칸 색 아래에 깐다: 띠 안의 채워진 칸(종류 하나 — 가운데가 나눔 선이 아닌 칸) 색은 그대로다
+        int iBandCells = 0;
+        for (const LayoutMatrixCell& cell : m_layout.vecCells)
+        {
+            if ((cell.iRow != iRow && cell.iColumn != iRow) || cell.vecKinds.size() != 1)
+                continue;
+            const QPoint ptCell = view.GetCellRect(cell.iRow, cell.iColumn).center().toPoint();
+            QCOMPARE(imageAfter.pixelColor(ptCell), imageBefore.pixelColor(ptCell));
+            ++iBandCells;
+        }
+        QVERIFY(iBandCells > 0);
+
+        Click(view, ptLabel);
+        QCOMPARE(spyConcept.count(), 2);
+        QCOMPARE(spyConcept.at(1).at(0).toString(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(ViewTestSupport::Render(view), imageAfter);
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // L7a: 열 이름표 맞힘 칸(GetColumnLabelArea) 안을 누르면 그 개념을 고른다. 그림은 그 개념의 행 이름표를 누른 것과 같다.
+    // 고른 열 이름표는 굵게 쓰므로 맞힘 칸이 줄지 않고, 다른 열 이름표를 누르면 고른 것이 옮겨 간다
+    void columnLabelClickActivates()
+    {
+        const int iColumn = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kYolov2Id));
+        const int iOther = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId));
+        QVERIFY(iColumn >= 0 && iOther >= 0);
+        KnowledgeMatrixView rowClicked;
+        rowClicked.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        rowClicked.SetGraph(m_graph, m_layout);
+        Click(rowClicked, GetRowLabelPoint(rowClicked, iColumn));
+        QCOMPARE(rowClicked.GetSelectedId(), DecodeUtf8(kYolov2Id));
+
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const QPolygonF areaBefore = view.GetColumnLabelArea(iColumn);
+        const QPoint ptLabel = GetColumnLabelPoint(view, iColumn);
+        QVERIFY(areaBefore.containsPoint(QPointF(ptLabel), Qt::OddEvenFill));
+        QCOMPARE(view.FindCellAt(ptLabel), qMakePair(-1, -1));
+        QVERIFY2(view.GetToolTipAt(ptLabel).contains(DecodeUtf8(kYolov2Name)), qUtf8Printable(view.GetToolTipAt(ptLabel)));
+
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        Click(view, ptLabel);
+        QCOMPARE(spyConcept.count(), 1);
+        QCOMPARE(spyConcept.at(0).at(0).toString(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(ViewTestSupport::Render(view), ViewTestSupport::Render(rowClicked));
+        const QPolygonF areaAfter = view.GetColumnLabelArea(iColumn);
+        QCOMPARE(areaAfter.size(), areaBefore.size());
+        const double dLengthBefore = QLineF((areaBefore[0] + areaBefore[3]) / 2, (areaBefore[1] + areaBefore[2]) / 2).length();
+        const double dLengthAfter = QLineF((areaAfter[0] + areaAfter[3]) / 2, (areaAfter[1] + areaAfter[2]) / 2).length();
+        QVERIFY2(dLengthAfter >= dLengthBefore, qPrintable(QStringLiteral("%1 < %2").arg(dLengthAfter).arg(dLengthBefore)));
+
+        Click(view, GetColumnLabelPoint(view, iOther));
+        QCOMPARE(spyConcept.count(), 2);
+        QCOMPARE(spyConcept.at(1).at(0).toString(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(view.GetColumnLabelArea(iColumn), areaBefore);   // 고르지 않은 열은 처음 맞힘 칸
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // L7b: 밖에서 고르면 그 이름표를 누른 그림과 같고 신호가 없다. 같은 id 를 다시 고르면 그대로다. 모르는 id · 빈 글이면 고른 것을 지우고
+    // 고르지 않은 그림과 같다(신호 없음). 스크롤 영역 안의 큰 행렬에서 위젯 밖의 행을 골라도 옮기지 않는다
+    void selectConceptHighlightsWithoutSignal()
+    {
+        const int iNode = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        KnowledgeMatrixView clicked;
+        clicked.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        clicked.SetGraph(m_graph, m_layout);
+        Click(clicked, GetRowLabelPoint(clicked, iNode));
+        QCOMPARE(clicked.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        const QImage imageClicked = ViewTestSupport::Render(clicked);
+
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const QImage imageNone = ViewTestSupport::Render(view);
+        QVERIFY(imageClicked != imageNone);
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(ViewTestSupport::Render(view), imageClicked);
+
+        for (const QString& strId : { DecodeUtf8(kUnknownId), QString() })
+        {
+            view.SelectConcept(DecodeUtf8(kYolov2Id));
+            QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+            view.SelectConcept(strId);
+            QCOMPARE(view.GetSelectedId(), QString());
+            QCOMPARE(ViewTestSupport::Render(view), imageNone);
+            view.SelectConcept(strId);   // 고른 것이 없을 때도 그대로
+            QCOMPARE(view.GetSelectedId(), QString());
+        }
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+
+        // 스크롤 영역: 맨 끝 행(위젯 밖)을 골라도 스크롤 · 칸 자리가 그대로다
+        QScrollArea area;
+        area.setWidgetResizable(true);
+        KnowledgeMatrixView* pView = new KnowledgeMatrixView;
+        area.setWidget(pView);
+        area.resize(kSmallSize);
+        area.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&area));
+        pView->SetGraph(m_graph, m_layout);
+        const QSize sizeHint = pView->minimumSizeHint();
+        QTRY_VERIFY(pView->width() >= sizeHint.width() && pView->height() >= sizeHint.height());
+        const int iHorizontal = area.horizontalScrollBar()->value();
+        const int iVertical = area.verticalScrollBar()->value();
+        const QRectF rectGrid = pView->GetGridRect();
+        const QString strLast = m_layout.vecMatrixOrder.last();
+        QVERIFY(!QRectF(area.viewport()->rect()).contains(pView->GetCellRect(kOrder - 1, kOrder - 1)));
+        QSignalSpy spyScrollConcept(pView, &KnowledgeMatrixView::ConceptActivated);
+        pView->SelectConcept(strLast);
+        QCOMPARE(pView->GetSelectedId(), strLast);
+        QCoreApplication::processEvents();
+        QCOMPARE(area.horizontalScrollBar()->value(), iHorizontal);
+        QCOMPARE(area.verticalScrollBar()->value(), iVertical);
+        QCOMPARE(pView->GetGridRect(), rectGrid);
+        QCOMPARE(spyScrollConcept.count(), 0);
+    }
+
+    // L7c: 고른 뒤 빈 곳(이름표 · 칸 · 범례 밖)을 누르면 고른 것을 지운 뒤 SelectionCleared 를 한 번 낸다(받을 때 GetSelectedId 는 빈 글).
+    // 고른 것이 없어도 낸다. 열 이름표 글 너머 빈 곳도 빈 곳이다
+    void emptyClickEmitsSelectionCleared()
+    {
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const QImage imageNone = ViewTestSupport::Render(view);
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        QStringList vecSelectedAtSignal;
+        connect(&view, &KnowledgeMatrixView::SelectionCleared, this, [&view, &vecSelectedAtSignal]() { vecSelectedAtSignal << view.GetSelectedId(); });
+
+        const int iRow = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId));
+        QVERIFY(iRow >= 0);
+        Click(view, GetRowLabelPoint(view, iRow));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(spyCleared.count(), 0);
+
+        const QPoint ptEmpty(2, view.height() - 3);
+        QCOMPARE(view.FindCellAt(ptEmpty), qMakePair(-1, -1));
+        QCOMPARE(view.GetToolTipAt(ptEmpty), QString());
+        QVERIFY(!view.GetLegendRect().contains(QPointF(ptEmpty)));
+        Click(view, ptEmpty);
+        QCOMPARE(spyCleared.count(), 1);
+        QCOMPARE(vecSelectedAtSignal, QStringList { QString() });
+        QCOMPARE(view.GetSelectedId(), QString());
+        QCOMPARE(ViewTestSupport::Render(view), imageNone);
+
+        // 고른 것이 없어도 낸다
+        Click(view, ptEmpty);
+        QCOMPARE(spyCleared.count(), 2);
+        QCOMPARE(vecSelectedAtSignal, (QStringList { QString(), QString() }));
+
+        // 열 이름표 글 너머(같은 기울인 띠): 이름표가 아니라 빈 곳
+        Click(view, GetRowLabelPoint(view, iRow));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        const QPolygonF area = view.GetColumnLabelArea(kOrder - 1);
+        const QPointF ptStart = (area[0] + area[3]) / 2;
+        const QPointF ptEnd = (area[1] + area[2]) / 2;
+        const QPoint ptBeyond = (ptEnd + (ptEnd - ptStart) / QLineF(ptStart, ptEnd).length() * kBeyondText).toPoint();
+        QCOMPARE(view.GetToolTipAt(ptBeyond), QString());
+        Click(view, ptBeyond);
+        QCOMPARE(spyCleared.count(), 3);
+        QCOMPARE(view.GetSelectedId(), QString());
+        QCOMPARE(spyConcept.count(), 2);
+    }
+
+    // L7c: 칸(채워진 칸 · 빈 칸 · 대각선 칸) · 범례 안을 누르면 신호가 없고 고른 것 · 그림이 그대로다. 고른 것이 없을 때도 신호가 없다
+    void cellAndLegendClicksDoNotClear()
+    {
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const int iTwoKindRow = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kTwoKindRow));
+        const int iTwoKindColumn = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kTwoKindColumn));
+        QVERIFY(iTwoKindRow >= 0 && iTwoKindColumn >= 0);
+        QVERIFY(!view.GetLegendRect().isEmpty());
+        const QVector<QPoint> vecPoints { view.GetCellRect(iTwoKindRow, iTwoKindColumn).center().toPoint(),
+                                          view.GetCellRect(iTwoKindColumn, iTwoKindRow).center().toPoint(),
+                                          view.GetCellRect(0, 0).center().toPoint(), (view.GetCellRect(kOrder - 1, kOrder - 1).bottomRight() - QPointF(1, 1)).toPoint(),
+                                          view.GetLegendRect().center().toPoint(), view.GetLegendRect().topLeft().toPoint() + QPoint(1, 1) };
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        for (const QPoint& ptClick : vecPoints)
+        {
+            QVERIFY2(view.FindCellAt(ptClick).first >= 0 || view.GetLegendRect().contains(QPointF(ptClick)),
+                     qPrintable(QStringLiteral("(%1, %2)").arg(ptClick.x()).arg(ptClick.y())));
+            Click(view, ptClick);
+            QCOMPARE(view.GetSelectedId(), QString());
+        }
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+
+        view.SelectConcept(DecodeUtf8(kFasterRcnnId));
+        const QImage imageSelected = ViewTestSupport::Render(view);
+        for (const QPoint& ptClick : vecPoints)
+        {
+            Click(view, ptClick);
+            QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        }
+        QCOMPARE(ViewTestSupport::Render(view), imageSelected);
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // SetGraph 는 고른 것을 소리 없이 지운다(그림은 처음과 같다). SetTheme 은 고른 것을 그대로 둔다
+    void setGraphClearsSilently()
+    {
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const QImage imageNone = ViewTestSupport::Render(view);
+        const int iRow = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId));
+        QVERIFY(iRow >= 0);
+        Click(view, GetRowLabelPoint(view, iRow));
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+        view.SetTheme(VisualMarkdownTheme::MakeLight());
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+        view.SetGraph(m_graph, m_layout);
+        QCOMPARE(view.GetSelectedId(), QString());
+        QCOMPARE(ViewTestSupport::Render(view), imageNone);
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        view.SetGraph(KnowledgeGraph(), GraphLayoutOutput());
+        QCOMPARE(view.GetSelectedId(), QString());
+        QVERIFY(!ViewTestSupport::Render(view).isNull());
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+    }
+
+    // 고르지 않은 그림은 L7 전과 같다: 그리기 시험(rendersMatrix · findsTwoKindCell 등)이 그대로 지나고, 두 테마 모두 처음 그림 =
+    // 빈 글을 고른 그림 = 골랐다가 푼(밖에서 · 빈 곳 누르기) 그림이다
+    void defaultDrawingUnchanged()
+    {
+        for (const bool bDark : { false, true })
+        {
+            const VisualMarkdownTheme theme = bDark ? VisualMarkdownTheme::MakeDark() : VisualMarkdownTheme::MakeLight();
+            KnowledgeMatrixView fresh;
+            fresh.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+            fresh.SetTheme(theme);
+            fresh.SetGraph(m_graph, m_layout);
+            const QImage imageNone = ViewTestSupport::Render(fresh);
+
+            KnowledgeMatrixView view;
+            view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+            view.SetTheme(theme);
+            view.SetGraph(m_graph, m_layout);
+            view.SelectConcept(QString());
+            QCOMPARE(view.GetSelectedId(), QString());
+            QCOMPARE(ViewTestSupport::Render(view), imageNone);
+            view.SelectConcept(DecodeUtf8(kYolov2Id));
+            QVERIFY(ViewTestSupport::Render(view) != imageNone);
+            view.SelectConcept(QString());
+            QCOMPARE(ViewTestSupport::Render(view), imageNone);
+            Click(view, GetRowLabelPoint(view, m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId))));
+            QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
+            QVERIFY(ViewTestSupport::Render(view) != imageNone);
+            Click(view, QPoint(2, view.height() - 3));
+            QCOMPARE(view.GetSelectedId(), QString());
+            QCOMPARE(ViewTestSupport::Render(view), imageNone);
+        }
+    }
+
+    // 끌기(누른 뒤 kDragDelta 만큼 옮겨 놓기)는 누르기가 아니다: 이름표 · 빈 곳 어디서든 신호가 없다. 두 번 누르기는 첫 누르기에서 한 번만 낸다.
+    // 왼쪽이 아닌 단추는 누르기가 아니다
+    void dragAndDoubleClickAreNotClicks()
+    {
+        KnowledgeMatrixView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, m_layout);
+        const int iRow = m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId));
+        QVERIFY(iRow >= 0);
+        const QPoint ptLabel = GetRowLabelPoint(view, iRow);
+        QVERIFY(view.GetToolTipAt(ptLabel + kDragDelta).contains(DecodeUtf8(kFasterRcnnName)));   // 끈 끝도 같은 이름표
+        const QPoint ptEmpty(2, view.height() - 3);
+        QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
+        QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
+
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptLabel, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseMove, ptLabel + kDragDelta / 2, Qt::NoButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseMove, ptLabel + kDragDelta, Qt::NoButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptLabel + kDragDelta, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(view.GetSelectedId(), QString());
+
+        view.SelectConcept(DecodeUtf8(kYolov2Id));
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptEmpty, Qt::LeftButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseMove, ptEmpty - kDragDelta.transposed(), Qt::NoButton, Qt::LeftButton);
+        ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptEmpty - kDragDelta.transposed(), Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(spyCleared.count(), 0);
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+
+        // 왼쪽이 아닌 단추
+        QTest::mouseClick(&view, Qt::RightButton, Qt::NoModifier, ptLabel);
+        QTest::mouseClick(&view, Qt::RightButton, Qt::NoModifier, ptEmpty);
+        QCOMPARE(view.GetSelectedId(), DecodeUtf8(kYolov2Id));
+        QCOMPARE(spyConcept.count(), 0);
+        QCOMPARE(spyCleared.count(), 0);
+
+        // 두 번 누르기(누름 · 놓음 · 두 번 누름 · 놓음): 이름표는 ConceptActivated 한 번, 빈 곳은 SelectionCleared 한 번
+        for (const QPoint& ptClick : { ptLabel, ptEmpty })
+        {
+            ViewTestSupport::SendMouse(view, QEvent::MouseButtonPress, ptClick, Qt::LeftButton, Qt::LeftButton);
+            ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptClick, Qt::LeftButton, Qt::NoButton);
+            ViewTestSupport::SendMouse(view, QEvent::MouseButtonDblClick, ptClick, Qt::LeftButton, Qt::LeftButton);
+            ViewTestSupport::SendMouse(view, QEvent::MouseButtonRelease, ptClick, Qt::LeftButton, Qt::NoButton);
+        }
+        QCOMPARE(spyConcept.count(), 1);
+        QCOMPARE(spyConcept.at(0).at(0).toString(), DecodeUtf8(kFasterRcnnId));
+        QCOMPARE(spyCleared.count(), 1);
+        QCOMPARE(view.GetSelectedId(), QString());
     }
 
 private:

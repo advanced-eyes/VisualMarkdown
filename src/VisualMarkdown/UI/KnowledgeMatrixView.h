@@ -21,6 +21,7 @@ class QPainter;
 // 관계 행렬(MATRIX 배치)을 그리는 위젯(design/Views.md §7). 행 · 열은 vecMatrixOrder 순이고, 칸은 그 칸에 떨어지는 관계 종류의 색이다.
 // 종류가 둘이면 칸을 대각선으로 나누고, 셋 이상이면 같은 너비의 띠로 나눈다. AI 제안 관계는 옅게 칠한다.
 // 위젯 크기에 맞춰 칸 크기를 정하되, 읽을 수 있는 가장 작은 칸보다 작게 하지 않는다.
+// 행 · 열 이름표를 누르면 그 개념을 고르고 시그널을 낸다. 고른 개념은 행 · 열 띠를 옅게 깔고(칸 색 아래) 이름표를 굵게 쓴다.
 class KnowledgeMatrixView : public QWidget
 {
     Q_OBJECT
@@ -30,8 +31,20 @@ public:
     ~KnowledgeMatrixView() override;
 
 public:
+    // 고른 것은 지운다(시그널 없음)
     void SetGraph(const KnowledgeGraph& graph, const GraphLayoutOutput& layout);
-    void SetTheme(const VisualMarkdownTheme& theme);
+    void SetTheme(const VisualMarkdownTheme& theme);   // 고른 것은 그대로 둔다
+    // 밖에서 개념을 고른다: 그 개념의 이름표를 누른 것과 같이 고르되(행 · 열 강조) 시그널을 내지 않는다.
+    // 빈 글 · 모르는 id 면 고른 것을 지운다. 이미 고른 id 면 그대로 둔다. 스크롤 · 칸 자리는 바꾸지 않는다
+    void SelectConcept(const QString& conceptId);
+    QString GetSelectedId() const;   // 고른 개념 id. 없으면 빈 글
+
+signals:
+    // 사용자가 행 · 열 이름표를 눌러(끌기가 아닌 누르기) 그 개념을 고른 뒤 낸다. 이미 고른 개념을 다시 눌러도 낸다
+    void ConceptActivated(const QString& conceptId);
+    // 사용자가 빈 곳(이름표 · 칸 · 범례 밖)을 눌러 고른 것을 지운 뒤 낸다. 고른 것이 없었어도 낸다.
+    // SelectConcept · SetGraph 로 지울 때, 칸 · 범례 안을 누를 때(고른 것을 그대로 둔다)는 내지 않는다
+    void SelectionCleared();
 
 public:
     // 위치로 찾기(위젯 좌표). 보기 앱과 시험이 쓴다
@@ -58,6 +71,10 @@ public:
 protected:
     bool event(QEvent* event) override;                    // QEvent::ToolTip: 마우스 올림 설명
     void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;   // 두 번째 누르기는 누르기가 아니다(첫 누르기에서 이미 냈다)
 
 private:
     // 칸 하나에 그리는 종류 · 상태(종류마다 확인됨이 하나라도 있으면 확인됨)
@@ -92,6 +109,9 @@ private:
     QString MakeCellToolTip(int row, int column) const;
     QString MakeLabelToolTip(int node) const;
     QString GetNodeName(int node) const;
+    int FindLabelAt(const QPoint& pos) const;                 // 행 · 열 이름표의 점 자리. 이름표 밖이면 -1
+    void SelectNode(int node);                                // 고른다(-1 이면 지운다). 시그널을 내지 않는다
+    void HandleClick(const QPoint& pos);
     int GetLabelFontPx(double cell) const;                    // 행 · 열 이름표 글자 크기(칸 크기에 맞춘다)
     QPolygonF MakeColumnLabelArea(const MatrixGeometry& geometry, const QFontMetricsF& metrics, int column) const;
     QStringList ListLegendKinds() const;
@@ -106,4 +126,11 @@ private:
     QVector<QVector<CellKind>> m_vecCellKinds;   // 행 × 열 → 그 칸의 종류(빈 칸은 비었다)
     QVector<int> m_vecBlockEnds;                 // 덩어리 경계: 그 앞에서 덩어리가 끝나는 행 · 열 자리
     QSize m_sizeLegend;
+
+    QString m_strSelectedId;
+    int m_iSelectedNode;                         // 고른 행 · 열(vecNodes 자리). 없으면 -1
+
+    bool m_bPressed;                             // 왼쪽 단추를 눌렀다(놓기 전)
+    bool m_bDragging;                            // 누른 뒤 kDragThreshold 넘게 움직였다: 누르기가 아니다
+    QPoint m_ptPress;
 };

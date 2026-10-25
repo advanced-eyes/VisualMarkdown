@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QFontMetricsF>
 #include <QHelpEvent>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
 #include <QSet>
@@ -29,6 +30,8 @@ constexpr double kSqrtHalf = 0.70710678118654752440;   // sin 45° = cos 45°
 constexpr double kLabelFontRatio = 0.85; // 이름표 글자는 칸 크기의 이만큼까지
 constexpr int kMinLabelFontPx = 9;
 constexpr double kLabelHitSlack = 4;     // 열 이름표 맞힘 칸: 글 너비에 더하는 여유
+constexpr int kDragThreshold = 4;        // 누른 뒤 이만큼(px) 움직이면 누르기가 아니라 끌기다(KnowledgeGraphView 와 같다)
+constexpr double kSelectionBandOpacity = 0.4;   // 고른 행 · 열 띠: 테마 selectionHalo 의 불투명도에 곱한다(옅게 깐다)
 
 // 범례: 머리 줄 셋(관계 · 상태 · 읽는 법)과 견본(견본 칸 안의 작은 칸)
 constexpr int kLegendHeaderRows = 3;
@@ -53,6 +56,11 @@ KnowledgeMatrixView::KnowledgeMatrixView(QWidget* parent)
     , m_vecCellKinds()
     , m_vecBlockEnds()
     , m_sizeLegend()
+    , m_strSelectedId()
+    , m_iSelectedNode(-1)
+    , m_bPressed(false)
+    , m_bDragging(false)
+    , m_ptPress()
 {
     setAttribute(Qt::WA_OpaquePaintEvent);
     RebuildCells();
@@ -64,6 +72,10 @@ void KnowledgeMatrixView::SetGraph(const KnowledgeGraph& graph, const GraphLayou
 {
     m_graph = graph;
     m_layout = layout;
+    // 고른 것과 누르기 상태를 지운다(시그널 없음). 누른 채 그래프가 바뀌면 그 놓기는 누르기가 아니다
+    m_bPressed = false;
+    m_bDragging = false;
+    SelectNode(-1);
     RebuildCells();
     updateGeometry();   // 크기 힌트가 바뀐다(점 수 · 이름표)
     update();
@@ -75,6 +87,30 @@ void KnowledgeMatrixView::SetTheme(const VisualMarkdownTheme& theme)
     RebuildCells();   // 범례 크기는 글꼴에 따른다
     updateGeometry();
     update();
+}
+
+void KnowledgeMatrixView::SelectConcept(const QString& conceptId)
+{
+    // 시그널을 내지 않는다: 쓰는 쪽이 자기 고르기에 맞추려고 부르므로 되먹임을 막는다. 스크롤 · 칸 자리도 그대로 둔다
+    int iNode = -1;
+    if (!conceptId.isEmpty())
+    {
+        for (int iCandidate = 0; iCandidate < m_layout.vecNodes.size(); ++iCandidate)
+        {
+            if (m_layout.vecNodes[iCandidate].strId == conceptId)
+            {
+                iNode = iCandidate;
+                break;
+            }
+        }
+    }
+    if (iNode != m_iSelectedNode)   // 같은 id(또는 고른 것 없이 빈 글 · 모르는 id)면 그대로 둔다
+        SelectNode(iNode);
+}
+
+QString KnowledgeMatrixView::GetSelectedId() const
+{
+    return m_strSelectedId;
 }
 
 QPair<int, int> KnowledgeMatrixView::FindCellAt(const QPoint& pos) const
@@ -93,25 +129,7 @@ QString KnowledgeMatrixView::GetToolTipAt(const QPoint& pos) const
     const QPair<int, int> pairCell = FindCellAt(pos);
     if (pairCell.first >= 0)
         return MakeCellToolTip(pairCell.first, pairCell.second);
-
-    // 이름표: 행은 칸 왼쪽 띠, 열은 칸 위의 기울어진 글
-    const MatrixGeometry geometry = ComputeGeometry();
-    const int iOrder = m_layout.vecNodes.size();
-    if (iOrder == 0 || geometry.dCell <= 0)
-        return QString();
-    const QRectF& rectGrid = geometry.grid;
-    const QPointF ptPos(pos);
-    if (ptPos.x() >= rectGrid.left() - geometry.dRowLabelWidth && ptPos.x() < rectGrid.left() && ptPos.y() >= rectGrid.top() && ptPos.y() < rectGrid.bottom())
-        return MakeLabelToolTip(std::min(iOrder - 1, static_cast<int>((ptPos.y() - rectGrid.top()) / geometry.dCell)));
-    if (ptPos.y() < rectGrid.top())
-    {
-        // 열 이름표: 그린 글 너비(작은 여유 포함)의 기울인 네모만 맞힌다. 글 너머 빈 곳은 맞히지 않는다
-        const QFontMetricsF metrics(MakeFont(GetLabelFontPx(geometry.dCell)));
-        for (int iColumn = 0; iColumn < iOrder; ++iColumn)
-            if (MakeColumnLabelArea(geometry, metrics, iColumn).containsPoint(ptPos, Qt::OddEvenFill))
-                return MakeLabelToolTip(iColumn);
-    }
-    return QString();
+    return MakeLabelToolTip(FindLabelAt(pos));   // 이름표 밖이면 빈 글
 }
 
 QRectF KnowledgeMatrixView::GetCellRect(int row, int column) const
@@ -175,6 +193,58 @@ bool KnowledgeMatrixView::event(QEvent* event)
     return QWidget::event(event);
 }
 
+void KnowledgeMatrixView::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton)
+    {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+    m_bPressed = true;
+    m_bDragging = false;
+    m_ptPress = event->pos();
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseMoveEvent(QMouseEvent* event)
+{
+    if (!m_bPressed || !(event->buttons() & Qt::LeftButton))
+    {
+        QWidget::mouseMoveEvent(event);
+        return;
+    }
+    if ((event->pos() - m_ptPress).manhattanLength() >= kDragThreshold)
+        m_bDragging = true;
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton || !m_bPressed)
+    {
+        QWidget::mouseReleaseEvent(event);
+        return;
+    }
+    // 끌기(움직임 이벤트 없이 멀리서 놓은 것도)는 누르기가 아니다
+    const bool bClick = !m_bDragging && (event->pos() - m_ptPress).manhattanLength() < kDragThreshold;
+    m_bPressed = false;
+    m_bDragging = false;
+    if (bClick)
+        HandleClick(event->pos());
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton)
+    {
+        QWidget::mouseDoubleClickEvent(event);
+        return;
+    }
+    // QWidget 은 두 번째 누르기를 mousePressEvent 로 넘기지만, 첫 누르기에서 이미 고르기 · 시그널을 했으므로 다시 하지 않는다
+    event->accept();
+}
+
 void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
@@ -193,6 +263,19 @@ void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
     }
     const double dCell = geometry.dCell;
     const QRectF& rectGrid = geometry.grid;
+
+    // 고른 개념의 행 · 열 띠: 칸 색 · 대각선 · 격자 아래에 옅게 깐다. 겹치는 칸(제 자신의 대각선)은 한 번만 칠한다. 다른 행 · 열은 흐리지 않는다
+    if (m_iSelectedNode >= 0 && m_iSelectedNode < iOrder)
+    {
+        // 테마 고름 후광 색을 더 옅게 쓴다(띠가 칸 색처럼 읽히지 않게)
+        QColor colorBand = m_theme.selectionHalo;
+        colorBand.setAlphaF(colorBand.alphaF() * kSelectionBandOpacity);
+        const double dBandTop = rectGrid.top() + m_iSelectedNode * dCell;
+        const double dBandLeft = rectGrid.left() + m_iSelectedNode * dCell;
+        painter.fillRect(QRectF(rectGrid.left(), dBandTop, rectGrid.width(), dCell), colorBand);
+        painter.fillRect(QRectF(dBandLeft, rectGrid.top(), dCell, dBandTop - rectGrid.top()), colorBand);
+        painter.fillRect(QRectF(dBandLeft, dBandTop + dCell, dCell, rectGrid.bottom() - dBandTop - dCell), colorBand);
+    }
 
     // 대각선(제 자신)은 옅게 칠해 행 · 열을 맞춰 보기 쉽게 한다. 채워진 칸은 종류 색
     painter.setPen(Qt::NoPen);
@@ -229,15 +312,28 @@ void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
     const double dLabelWidth = geometry.dRowLabelWidth - kLabelGap;
     for (int iNode = 0; iNode < iOrder; ++iNode)
     {
+        // 고른 개념의 이름표는 같은 글(보통 글꼴로 줄인 이름)을 고름 색 · 굵게 쓴다. 굵은 글이 조금 넓어도 자르지 않는다
+        const bool bSelected = iNode == m_iSelectedNode;
+        const int iClipFlag = bSelected ? Qt::TextDontClip : 0;
+        if (bSelected)
+        {
+            painter.setFont(MakeFont(GetLabelFontPx(dCell), true));
+            painter.setPen(m_theme.selectionRing);
+        }
         const QString strName = metrics.elidedText(GetNodeName(iNode), Qt::ElideRight, dLabelWidth);
-        painter.drawText(QRectF(rectGrid.left() - geometry.dRowLabelWidth, rectGrid.top() + iNode * dCell, dLabelWidth, dCell), Qt::AlignRight | Qt::AlignVCenter,
-                         strName);
+        painter.drawText(QRectF(rectGrid.left() - geometry.dRowLabelWidth, rectGrid.top() + iNode * dCell, dLabelWidth, dCell),
+                         Qt::AlignRight | Qt::AlignVCenter | iClipFlag, strName);
         painter.save();
         painter.translate(rectGrid.left() + (iNode + 0.5) * dCell, rectGrid.top() - kLabelGap);
         painter.rotate(kColumnLabelAngle);
-        painter.drawText(QRectF(0, -dCell / 2, kMaxLabelWidth, dCell), Qt::AlignLeft | Qt::AlignVCenter,
+        painter.drawText(QRectF(0, -dCell / 2, kMaxLabelWidth, dCell), Qt::AlignLeft | Qt::AlignVCenter | iClipFlag,
                          metrics.elidedText(GetNodeName(iNode), Qt::ElideRight, kMaxLabelWidth));
         painter.restore();
+        if (bSelected)
+        {
+            painter.setFont(fontLabel);
+            painter.setPen(m_theme.text);
+        }
     }
 
     DrawLegend(painter, geometry.legend);
@@ -420,6 +516,54 @@ QString KnowledgeMatrixView::GetNodeName(int node) const
     return iGraphNode >= 0 ? m_graph.GetNodes()[iGraphNode].strName : layoutNode.strId;
 }
 
+int KnowledgeMatrixView::FindLabelAt(const QPoint& pos) const
+{
+    // 이름표: 행은 칸 왼쪽 띠, 열은 칸 위의 기울어진 글
+    const MatrixGeometry geometry = ComputeGeometry();
+    const int iOrder = m_layout.vecNodes.size();
+    if (iOrder == 0 || geometry.dCell <= 0)
+        return -1;
+    const QRectF& rectGrid = geometry.grid;
+    const QPointF ptPos(pos);
+    if (ptPos.x() >= rectGrid.left() - geometry.dRowLabelWidth && ptPos.x() < rectGrid.left() && ptPos.y() >= rectGrid.top() && ptPos.y() < rectGrid.bottom())
+        return std::min(iOrder - 1, static_cast<int>((ptPos.y() - rectGrid.top()) / geometry.dCell));
+    if (ptPos.y() < rectGrid.top())
+    {
+        // 열 이름표: 그린 글 너비(작은 여유 포함)의 기울인 네모만 맞힌다. 글 너머 빈 곳은 맞히지 않는다
+        const QFontMetricsF metrics(MakeFont(GetLabelFontPx(geometry.dCell)));
+        for (int iColumn = 0; iColumn < iOrder; ++iColumn)
+            if (MakeColumnLabelArea(geometry, metrics, iColumn).containsPoint(ptPos, Qt::OddEvenFill))
+                return iColumn;
+    }
+    return -1;
+}
+
+void KnowledgeMatrixView::SelectNode(int node)
+{
+    m_iSelectedNode = node >= 0 && node < m_layout.vecNodes.size() ? node : -1;
+    m_strSelectedId = m_iSelectedNode >= 0 ? m_layout.vecNodes[m_iSelectedNode].strId : QString();
+    update();
+}
+
+void KnowledgeMatrixView::HandleClick(const QPoint& pos)
+{
+    // 범례 판은 칸 · 이름표 위에 그리므로(작은 위젯에서 겹칠 때) 먼저 본다. 판 안은 고른 것을 그대로 둔다
+    if (ComputeGeometry().legend.contains(QPointF(pos)))
+        return;
+    const int iNode = FindLabelAt(pos);
+    if (iNode >= 0)
+    {
+        SelectNode(iNode);
+        const QString strId = m_layout.vecNodes[iNode].strId;   // 받는 쪽이 SetGraph 를 불러도 남게 복사한다
+        emit ConceptActivated(strId);   // 이미 고른 개념이어도 낸다
+        return;
+    }
+    if (FindCellAt(pos).first >= 0)
+        return;   // 칸 누르기는 고르기가 아니다(고른 것을 그대로 둔다)
+    SelectNode(-1);
+    emit SelectionCleared();   // 고른 것이 없었어도 낸다(쓰는 쪽이 위젯 밖에서 고른 것도 풀 수 있게)
+}
+
 int KnowledgeMatrixView::GetLabelFontPx(double cell) const
 {
     return static_cast<int>(ViewCommon::Clamp(std::floor(cell * kLabelFontRatio), kMinLabelFontPx, m_theme.iLabelFontPx));
@@ -427,9 +571,12 @@ int KnowledgeMatrixView::GetLabelFontPx(double cell) const
 
 QPolygonF KnowledgeMatrixView::MakeColumnLabelArea(const MatrixGeometry& geometry, const QFontMetricsF& metrics, int column) const
 {
-    // 그리는 글(줄임표로 줄인 이름)의 너비 + 작은 여유, 높이는 글 한 줄(칸보다 크지 않게). 칸 위 가운데에서 45° 기울인다
-    const double dWidth = std::min(metrics.horizontalAdvance(metrics.elidedText(GetNodeName(column), Qt::ElideRight, kMaxLabelWidth)) + kLabelHitSlack,
-                                   kMaxLabelWidth);
+    // 그리는 글(줄임표로 줄인 이름)의 너비 + 작은 여유, 높이는 글 한 줄(칸보다 크지 않게). 칸 위 가운데에서 45° 기울인다.
+    // 고른 열은 같은 글을 굵게 그리므로 굵은 글 너비를 쓴다(보통 글은 정한 너비까지, 굵은 글은 그린 너비까지)
+    const QString strText = metrics.elidedText(GetNodeName(column), Qt::ElideRight, kMaxLabelWidth);
+    const bool bSelected = column == m_iSelectedNode;
+    const double dTextWidth = bSelected ? QFontMetricsF(MakeFont(GetLabelFontPx(geometry.dCell), true)).horizontalAdvance(strText) : metrics.horizontalAdvance(strText);
+    const double dWidth = std::min(dTextWidth + kLabelHitSlack, bSelected ? std::max(kMaxLabelWidth, dTextWidth) : kMaxLabelWidth);
     const double dHeight = std::min(metrics.height(), geometry.dCell);
     QTransform transform;
     transform.translate(geometry.grid.left() + (column + 0.5) * geometry.dCell, geometry.grid.top() - kLabelGap);
