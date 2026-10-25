@@ -44,24 +44,32 @@ constexpr const char* kPercentRow = "가 %1 %2";
 constexpr const char* kPercentColumn = "나 %2";
 constexpr double kRowLabelOffset = 10;   // 행 이름표: 칸 왼쪽으로 이만큼(px) 들어간 자리
 
-// 고르기(L7): showcase 행렬의 두 개념, 어느 행렬에도 없는 id, 행 이름표를 누르는 자리(칸 왼쪽으로 이만큼), 끌기 거리(같은 이름표 안에 머문다)
+// 고르기(L7): showcase 행렬의 두 개념과 어느 행렬에도 없는 id
 constexpr const char* kFasterRcnnId = "faster-r-cnn";
 constexpr const char* kFasterRcnnName = "Faster R-CNN";
 constexpr const char* kYolov2Id = "yolov2";
 constexpr const char* kYolov2Name = "YOLOv2";
 constexpr const char* kUnknownId = "no-such-concept";
-constexpr double kRowLabelInset = 20;
-const QPoint kDragDelta(12, 0);
+
+// 고르기(L7)에서 누르는 자리 · 그림을 견주는 자리(px)
+constexpr double kRowLabelClickOffset = 20;   // 누르는 행 이름표 자리: 칸 왼쪽으로 이만큼. kDragDelta 만큼 끌어도 같은 이름표 안이다
+const QPoint kDragDelta(12, 0);               // 끌기 거리: 누르기로 보는 거리(4px)보다 멀다
+constexpr int kEmptyInsetX = 2;               // 빈 곳: 위젯 왼쪽 아래 구석에서 이만큼 들어간 자리(이름표 · 칸 · 범례 판 밖)
+constexpr int kEmptyInsetY = 3;
+constexpr int kCornerInside = 1;              // 칸 영역 · 범례 판의 구석에서 이만큼 안쪽(경계 바로 안을 누른다)
+constexpr int kBandSlack = 1;                 // 행 · 열 띠의 가장자리 여유
 
 QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
 
 void Click(QWidget& widget, const QPoint& pos) { QTest::mouseClick(&widget, Qt::LeftButton, Qt::NoModifier, pos); }
 
-// 행 이름표 안의 자리: 그 행 첫 칸 왼쪽으로 kRowLabelInset 만큼
+QPoint GetEmptyPoint(const QWidget& widget) { return QPoint(kEmptyInsetX, widget.height() - kEmptyInsetY); }
+
+// 행 이름표 안의 자리: 그 행 첫 칸 왼쪽으로 kRowLabelClickOffset 만큼
 QPoint GetRowLabelPoint(const KnowledgeMatrixView& view, int row)
 {
     const QRectF rectCell = view.GetCellRect(row, 0);
-    return QPointF(rectCell.left() - kRowLabelInset, rectCell.center().y()).toPoint();
+    return QPointF(rectCell.left() - kRowLabelClickOffset, rectCell.center().y()).toPoint();
 }
 
 // 열 이름표 맞힘 칸(기울인 네모)의 가운데
@@ -71,15 +79,17 @@ QPoint GetColumnLabelPoint(const KnowledgeMatrixView& view, int column)
     return (((area[0] + area[3]) / 2 + (area[1] + area[2]) / 2) / 2).toPoint();
 }
 
-// 행 · 열 띠(칸 영역 안, 가장자리 1px 여유)
+// 행 · 열 띠(칸 영역 안, 가장자리 kBandSlack 여유)
 QRect GetRowBand(const KnowledgeMatrixView& view, int row)
 {
-    return QRectF(view.GetCellRect(row, 0).topLeft(), view.GetCellRect(row, kOrder - 1).bottomRight()).toAlignedRect().adjusted(-1, -1, 1, 1);
+    const QRectF rectBand(view.GetCellRect(row, 0).topLeft(), view.GetCellRect(row, kOrder - 1).bottomRight());
+    return rectBand.toAlignedRect().adjusted(-kBandSlack, -kBandSlack, kBandSlack, kBandSlack);
 }
 
 QRect GetColumnBand(const KnowledgeMatrixView& view, int column)
 {
-    return QRectF(view.GetCellRect(0, column).topLeft(), view.GetCellRect(kOrder - 1, column).bottomRight()).toAlignedRect().adjusted(-1, -1, 1, 1);
+    const QRectF rectBand(view.GetCellRect(0, column).topLeft(), view.GetCellRect(kOrder - 1, column).bottomRight());
+    return rectBand.toAlignedRect().adjusted(-kBandSlack, -kBandSlack, kBandSlack, kBandSlack);
 }
 
 // 칸 영역 안에서 두 띠 밖의 점 가운데 두 그림이 다른 점 수
@@ -573,7 +583,7 @@ private slots:
         QCOMPARE(spyScrollConcept.count(), 0);
     }
 
-    // L7c: 고른 뒤 빈 곳(이름표 · 칸 · 범례 밖)을 누르면 고른 것을 지운 뒤 SelectionCleared 를 한 번 낸다(받을 때 GetSelectedId 는 빈 글).
+    // L7c: 고른 뒤 빈 곳(이름표 · 칸 · 범례 판 밖)을 누르면 고른 것을 지운 뒤 SelectionCleared 를 한 번 낸다(받을 때 GetSelectedId 는 빈 글).
     // 고른 것이 없어도 낸다. 열 이름표 글 너머 빈 곳도 빈 곳이다
     void emptyClickEmitsSelectionCleared()
     {
@@ -592,7 +602,7 @@ private slots:
         QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
         QCOMPARE(spyCleared.count(), 0);
 
-        const QPoint ptEmpty(2, view.height() - 3);
+        const QPoint ptEmpty = GetEmptyPoint(view);
         QCOMPARE(view.FindCellAt(ptEmpty), qMakePair(-1, -1));
         QCOMPARE(view.GetToolTipAt(ptEmpty), QString());
         QVERIFY(!view.GetLegendRect().contains(QPointF(ptEmpty)));
@@ -621,7 +631,7 @@ private slots:
         QCOMPARE(spyConcept.count(), 2);
     }
 
-    // L7c: 칸(채워진 칸 · 빈 칸 · 대각선 칸) · 범례 안을 누르면 신호가 없고 고른 것 · 그림이 그대로다. 고른 것이 없을 때도 신호가 없다
+    // L7c: 칸(채워진 칸 · 빈 칸 · 대각선 칸) · 범례 판 안을 누르면 신호가 없고 고른 것 · 그림이 그대로다. 고른 것이 없을 때도 신호가 없다
     void cellAndLegendClicksDoNotClear()
     {
         KnowledgeMatrixView view;
@@ -633,8 +643,10 @@ private slots:
         QVERIFY(!view.GetLegendRect().isEmpty());
         const QVector<QPoint> vecPoints { view.GetCellRect(iTwoKindRow, iTwoKindColumn).center().toPoint(),
                                           view.GetCellRect(iTwoKindColumn, iTwoKindRow).center().toPoint(),
-                                          view.GetCellRect(0, 0).center().toPoint(), (view.GetCellRect(kOrder - 1, kOrder - 1).bottomRight() - QPointF(1, 1)).toPoint(),
-                                          view.GetLegendRect().center().toPoint(), view.GetLegendRect().topLeft().toPoint() + QPoint(1, 1) };
+                                          view.GetCellRect(0, 0).center().toPoint(),
+                                          (view.GetCellRect(kOrder - 1, kOrder - 1).bottomRight() - QPointF(kCornerInside, kCornerInside)).toPoint(),
+                                          view.GetLegendRect().center().toPoint(),
+                                          view.GetLegendRect().topLeft().toPoint() + QPoint(kCornerInside, kCornerInside) };
         QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
         QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
         for (const QPoint& ptClick : vecPoints)
@@ -659,7 +671,7 @@ private slots:
         QCOMPARE(spyCleared.count(), 0);
     }
 
-    // SetGraph 는 고른 것을 소리 없이 지운다(그림은 처음과 같다). SetTheme 은 고른 것을 그대로 둔다
+    // L7: SetGraph 는 고른 것을 소리 없이 지운다(그림은 처음과 같다). SetTheme 은 고른 것을 그대로 둔다
     void setGraphClearsSilently()
     {
         KnowledgeMatrixView view;
@@ -686,7 +698,7 @@ private slots:
         QCOMPARE(spyCleared.count(), 0);
     }
 
-    // 고르지 않은 그림은 L7 전과 같다: 그리기 시험(rendersMatrix · findsTwoKindCell 등)이 그대로 지나고, 두 테마 모두 처음 그림 =
+    // L7: 고르지 않은 그림은 L7 전과 같다: 그리기 시험(rendersMatrix · findsTwoKindCell 등)이 그대로 지나고, 두 테마 모두 처음 그림 =
     // 빈 글을 고른 그림 = 골랐다가 푼(밖에서 · 빈 곳 누르기) 그림이다
     void defaultDrawingUnchanged()
     {
@@ -713,13 +725,13 @@ private slots:
             Click(view, GetRowLabelPoint(view, m_layout.vecMatrixOrder.indexOf(DecodeUtf8(kFasterRcnnId))));
             QCOMPARE(view.GetSelectedId(), DecodeUtf8(kFasterRcnnId));
             QVERIFY(ViewTestSupport::Render(view) != imageNone);
-            Click(view, QPoint(2, view.height() - 3));
+            Click(view, GetEmptyPoint(view));
             QCOMPARE(view.GetSelectedId(), QString());
             QCOMPARE(ViewTestSupport::Render(view), imageNone);
         }
     }
 
-    // 끌기(누른 뒤 kDragDelta 만큼 옮겨 놓기)는 누르기가 아니다: 이름표 · 빈 곳 어디서든 신호가 없다. 두 번 누르기는 첫 누르기에서 한 번만 낸다.
+    // L7a · L7c: 끌기(누른 뒤 kDragDelta 만큼 옮겨 놓기)는 누르기가 아니다: 이름표 · 빈 곳 어디서든 신호가 없다. 두 번 누르기는 첫 누르기에서 한 번만 낸다.
     // 왼쪽이 아닌 단추는 누르기가 아니다
     void dragAndDoubleClickAreNotClicks()
     {
@@ -730,7 +742,7 @@ private slots:
         QVERIFY(iRow >= 0);
         const QPoint ptLabel = GetRowLabelPoint(view, iRow);
         QVERIFY(view.GetToolTipAt(ptLabel + kDragDelta).contains(DecodeUtf8(kFasterRcnnName)));   // 끈 끝도 같은 이름표
-        const QPoint ptEmpty(2, view.height() - 3);
+        const QPoint ptEmpty = GetEmptyPoint(view);
         QSignalSpy spyConcept(&view, &KnowledgeMatrixView::ConceptActivated);
         QSignalSpy spyCleared(&view, &KnowledgeMatrixView::SelectionCleared);
 

@@ -30,14 +30,16 @@ constexpr double kSqrtHalf = 0.70710678118654752440;   // sin 45° = cos 45°
 constexpr double kLabelFontRatio = 0.85; // 이름표 글자는 칸 크기의 이만큼까지
 constexpr int kMinLabelFontPx = 9;
 constexpr double kLabelHitSlack = 4;     // 열 이름표 맞힘 칸: 글 너비에 더하는 여유
-constexpr int kDragThreshold = 4;        // 누른 뒤 이만큼(px) 움직이면 누르기가 아니라 끌기다(KnowledgeGraphView 와 같다)
-constexpr double kSelectionBandOpacity = 0.4;   // 고른 행 · 열 띠: 테마 selectionHalo 의 불투명도에 곱한다(옅게 깐다)
 
 // 범례: 머리 줄 셋(관계 · 상태 · 읽는 법)과 견본(견본 칸 안의 작은 칸)
 constexpr int kLegendHeaderRows = 3;
 constexpr double kSwatchInsetX = 2;      // 견본 칸 왼쪽 여백
 constexpr double kSwatchInsetY = 4;      // 줄 위아래 여백
 constexpr double kSwatchTextGap = 12;    // 견본과 글자 사이
+
+// 고르기: 누르기와 끌기를 가르는 거리, 고른 행 · 열 띠
+constexpr int kDragThreshold = 4;               // 누른 뒤 이만큼(px) 움직이면 누르기가 아니라 끌기다(KnowledgeGraphView 와 같다)
+constexpr double kSelectionBandOpacity = 0.4;   // 띠 색: 테마 selectionHalo 의 불투명도에 이만큼 곱한다(옅게 깐다)
 
 const QString kEmptyMessage = QStringLiteral("그릴 점이 없다");
 const QString kRelationHeader = QStringLiteral("관계");
@@ -108,11 +110,6 @@ void KnowledgeMatrixView::SelectConcept(const QString& conceptId)
         SelectNode(iNode);
 }
 
-QString KnowledgeMatrixView::GetSelectedId() const
-{
-    return m_strSelectedId;
-}
-
 QPair<int, int> KnowledgeMatrixView::FindCellAt(const QPoint& pos) const
 {
     const MatrixGeometry geometry = ComputeGeometry();
@@ -159,6 +156,11 @@ QPolygonF KnowledgeMatrixView::GetColumnLabelArea(int column) const
     return MakeColumnLabelArea(geometry, QFontMetricsF(MakeFont(GetLabelFontPx(geometry.dCell))), column);
 }
 
+QString KnowledgeMatrixView::GetSelectedId() const
+{
+    return m_strSelectedId;
+}
+
 double KnowledgeMatrixView::GetCellSize() const
 {
     return ComputeGeometry().dCell;
@@ -191,58 +193,6 @@ bool KnowledgeMatrixView::event(QEvent* event)
         return true;
     }
     return QWidget::event(event);
-}
-
-void KnowledgeMatrixView::mousePressEvent(QMouseEvent* event)
-{
-    if (event->button() != Qt::LeftButton)
-    {
-        QWidget::mousePressEvent(event);
-        return;
-    }
-    m_bPressed = true;
-    m_bDragging = false;
-    m_ptPress = event->pos();
-    event->accept();
-}
-
-void KnowledgeMatrixView::mouseMoveEvent(QMouseEvent* event)
-{
-    if (!m_bPressed || !(event->buttons() & Qt::LeftButton))
-    {
-        QWidget::mouseMoveEvent(event);
-        return;
-    }
-    if ((event->pos() - m_ptPress).manhattanLength() >= kDragThreshold)
-        m_bDragging = true;
-    event->accept();
-}
-
-void KnowledgeMatrixView::mouseReleaseEvent(QMouseEvent* event)
-{
-    if (event->button() != Qt::LeftButton || !m_bPressed)
-    {
-        QWidget::mouseReleaseEvent(event);
-        return;
-    }
-    // 끌기(움직임 이벤트 없이 멀리서 놓은 것도)는 누르기가 아니다
-    const bool bClick = !m_bDragging && (event->pos() - m_ptPress).manhattanLength() < kDragThreshold;
-    m_bPressed = false;
-    m_bDragging = false;
-    if (bClick)
-        HandleClick(event->pos());
-    event->accept();
-}
-
-void KnowledgeMatrixView::mouseDoubleClickEvent(QMouseEvent* event)
-{
-    if (event->button() != Qt::LeftButton)
-    {
-        QWidget::mouseDoubleClickEvent(event);
-        return;
-    }
-    // QWidget 은 두 번째 누르기를 mousePressEvent 로 넘기지만, 첫 누르기에서 이미 고르기 · 시그널을 했으므로 다시 하지 않는다
-    event->accept();
 }
 
 void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
@@ -306,6 +256,7 @@ void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
 
     // 행 이름표(오른쪽 맞춤)와 열 이름표(45° 기울임)
     const QFont fontLabel = MakeFont(GetLabelFontPx(dCell));
+    const QFont fontSelected = MakeFont(GetLabelFontPx(dCell), true);   // 고른 개념의 이름표
     const QFontMetricsF metrics(fontLabel);
     painter.setFont(fontLabel);
     painter.setPen(m_theme.text);
@@ -317,7 +268,7 @@ void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
         const int iClipFlag = bSelected ? Qt::TextDontClip : 0;
         if (bSelected)
         {
-            painter.setFont(MakeFont(GetLabelFontPx(dCell), true));
+            painter.setFont(fontSelected);
             painter.setPen(m_theme.selectionRing);
         }
         const QString strName = metrics.elidedText(GetNodeName(iNode), Qt::ElideRight, dLabelWidth);
@@ -337,6 +288,58 @@ void KnowledgeMatrixView::paintEvent(QPaintEvent* event)
     }
 
     DrawLegend(painter, geometry.legend);
+}
+
+void KnowledgeMatrixView::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton)
+    {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+    m_bPressed = true;
+    m_bDragging = false;
+    m_ptPress = event->pos();
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseMoveEvent(QMouseEvent* event)
+{
+    if (!m_bPressed || !(event->buttons() & Qt::LeftButton))
+    {
+        QWidget::mouseMoveEvent(event);
+        return;
+    }
+    if ((event->pos() - m_ptPress).manhattanLength() >= kDragThreshold)
+        m_bDragging = true;
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton || !m_bPressed)
+    {
+        QWidget::mouseReleaseEvent(event);
+        return;
+    }
+    // 끌기(움직임 이벤트 없이 멀리서 놓은 것도)는 누르기가 아니다
+    const bool bClick = !m_bDragging && (event->pos() - m_ptPress).manhattanLength() < kDragThreshold;
+    m_bPressed = false;
+    m_bDragging = false;
+    if (bClick)
+        HandleClick(event->pos());
+    event->accept();
+}
+
+void KnowledgeMatrixView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton)
+    {
+        QWidget::mouseDoubleClickEvent(event);
+        return;
+    }
+    // QWidget 은 두 번째 누르기를 mousePressEvent 로 넘기지만, 첫 누르기에서 이미 고르기 · 시그널을 했으므로 다시 하지 않는다
+    event->accept();
 }
 
 void KnowledgeMatrixView::RebuildCells()
@@ -400,6 +403,32 @@ void KnowledgeMatrixView::RebuildCells()
     const int iRows = kLegendHeaderRows + vecLabels.size();
     m_sizeLegend = QSize(static_cast<int>(std::ceil(dWidth)) + 2 * kPanelPadding,
                          2 * kPanelPadding + iRows * kPanelRowHeight + (kLegendHeaderRows - 1) * kPanelHeaderGap);
+}
+
+void KnowledgeMatrixView::SelectNode(int node)
+{
+    m_iSelectedNode = node >= 0 && node < m_layout.vecNodes.size() ? node : -1;
+    m_strSelectedId = m_iSelectedNode >= 0 ? m_layout.vecNodes[m_iSelectedNode].strId : QString();
+    update();
+}
+
+void KnowledgeMatrixView::HandleClick(const QPoint& pos)
+{
+    // 범례 판은 칸 · 이름표 위에 그리므로(작은 위젯에서 겹칠 때) 먼저 본다. 판 안은 고른 것을 그대로 둔다
+    if (ComputeGeometry().legend.contains(QPointF(pos)))
+        return;
+    const int iNode = FindLabelAt(pos);
+    if (iNode >= 0)
+    {
+        SelectNode(iNode);
+        const QString strId = m_layout.vecNodes[iNode].strId;   // 받는 쪽이 SetGraph 를 불러도 남게 복사한다
+        emit ConceptActivated(strId);                           // 이미 고른 개념이어도 낸다
+        return;
+    }
+    if (FindCellAt(pos).first >= 0)
+        return;   // 칸 누르기는 고르기가 아니다(고른 것을 그대로 둔다)
+    SelectNode(-1);
+    emit SelectionCleared();   // 고른 것이 없었어도 낸다(쓰는 쪽이 위젯 밖에서 고른 것도 풀 수 있게)
 }
 
 KnowledgeMatrixView::MatrixGeometry KnowledgeMatrixView::ComputeGeometry() const
@@ -538,32 +567,6 @@ int KnowledgeMatrixView::FindLabelAt(const QPoint& pos) const
     return -1;
 }
 
-void KnowledgeMatrixView::SelectNode(int node)
-{
-    m_iSelectedNode = node >= 0 && node < m_layout.vecNodes.size() ? node : -1;
-    m_strSelectedId = m_iSelectedNode >= 0 ? m_layout.vecNodes[m_iSelectedNode].strId : QString();
-    update();
-}
-
-void KnowledgeMatrixView::HandleClick(const QPoint& pos)
-{
-    // 범례 판은 칸 · 이름표 위에 그리므로(작은 위젯에서 겹칠 때) 먼저 본다. 판 안은 고른 것을 그대로 둔다
-    if (ComputeGeometry().legend.contains(QPointF(pos)))
-        return;
-    const int iNode = FindLabelAt(pos);
-    if (iNode >= 0)
-    {
-        SelectNode(iNode);
-        const QString strId = m_layout.vecNodes[iNode].strId;   // 받는 쪽이 SetGraph 를 불러도 남게 복사한다
-        emit ConceptActivated(strId);   // 이미 고른 개념이어도 낸다
-        return;
-    }
-    if (FindCellAt(pos).first >= 0)
-        return;   // 칸 누르기는 고르기가 아니다(고른 것을 그대로 둔다)
-    SelectNode(-1);
-    emit SelectionCleared();   // 고른 것이 없었어도 낸다(쓰는 쪽이 위젯 밖에서 고른 것도 풀 수 있게)
-}
-
 int KnowledgeMatrixView::GetLabelFontPx(double cell) const
 {
     return static_cast<int>(ViewCommon::Clamp(std::floor(cell * kLabelFontRatio), kMinLabelFontPx, m_theme.iLabelFontPx));
@@ -575,8 +578,10 @@ QPolygonF KnowledgeMatrixView::MakeColumnLabelArea(const MatrixGeometry& geometr
     // 고른 열은 같은 글을 굵게 그리므로 굵은 글 너비를 쓴다(보통 글은 정한 너비까지, 굵은 글은 그린 너비까지)
     const QString strText = metrics.elidedText(GetNodeName(column), Qt::ElideRight, kMaxLabelWidth);
     const bool bSelected = column == m_iSelectedNode;
-    const double dTextWidth = bSelected ? QFontMetricsF(MakeFont(GetLabelFontPx(geometry.dCell), true)).horizontalAdvance(strText) : metrics.horizontalAdvance(strText);
-    const double dWidth = std::min(dTextWidth + kLabelHitSlack, bSelected ? std::max(kMaxLabelWidth, dTextWidth) : kMaxLabelWidth);
+    const double dTextWidth = bSelected ? QFontMetricsF(MakeFont(GetLabelFontPx(geometry.dCell), true)).horizontalAdvance(strText)
+                                        : metrics.horizontalAdvance(strText);
+    const double dMaxWidth = bSelected ? std::max(kMaxLabelWidth, dTextWidth) : kMaxLabelWidth;
+    const double dWidth = std::min(dTextWidth + kLabelHitSlack, dMaxWidth);
     const double dHeight = std::min(metrics.height(), geometry.dCell);
     QTransform transform;
     transform.translate(geometry.grid.left() + (column + 0.5) * geometry.dCell, geometry.grid.top() - kLabelGap);
