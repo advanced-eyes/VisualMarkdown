@@ -124,24 +124,24 @@ constexpr int kZoomIntoCorner = 6;              // 왼쪽 위 구석으로 휠�
 constexpr const char* kRenamedPrefix = "other-";   // 신호 안에서 넣는 배치는 id 마다 이 글을 앞에 붙인다
 constexpr int kMaxRefills = 4096;                  // 풀린 저장소를 덮을 때까지 만드는 사본 수의 위
 
-// L10: source 의 사본(떼어 내 새 저장소를 잡은 것)을 만들어 pRefills 에 둔다. 사본 하나의 원소 자리가 받은 id 의 자리(pId)를 덮으면,
-// 또는 kMaxRefills 개가 되면 그친다. source 는 누른 배치와 같은 배치를 이름만 바꾼 것이라 저장소 크기가 같고, 같은 크기 블록은
-// 막 풀린 블록을 다시 쓴다. 그래서 배치 안 id 의 참조를 그대로 실은 신호는 그 자리에서 사본의 id(앞에 kRenamedPrefix)를 읽어 틀린다.
+// L10: source 의 사본(떼어 내 제 저장소를 잡은 것)을 refills 에 하나씩 더한다. 어느 사본의 원소 자리가 받은 id 의 자리(id)를 덮거나
+// kMaxRefills 개가 되면 그친다. source 는 누른 배치와 같은 배치를 이름만 바꾼 것이라 저장소 크기가 같고, 같은 크기 블록은 막 풀린
+// 블록을 다시 쓴다. 그래서 배치 안 id 의 참조를 그대로 실은 신호는 그 자리에서 사본의 id(앞에 kRenamedPrefix)를 읽어 틀린다:
 // 풀린 메모리가 우연히 그대로 남아 시험이 통과하는 일을 막는다. 복사해 실은 id 는 스택에 있어 덮이지 않는다(그때는 kMaxRefills 개를 만든다)
 template <typename Container>
-void RefillFreedStorage(const QString* pId, const Container& source, QVector<Container>* pRefills)
+void RefillFreedStorage(const QString* id, const Container& source, QVector<Container>* refills)
 {
     if (source.isEmpty())
         return;
-    const quintptr uId = reinterpret_cast<quintptr>(pId);
-    while (pRefills->size() < kMaxRefills)
+    const quintptr uIdAddress = reinterpret_cast<quintptr>(id);
+    while (refills->size() < kMaxRefills)
     {
-        Container copy = source;
-        copy.detach();
-        const quintptr uBegin = reinterpret_cast<quintptr>(&copy.constFirst());
-        const quintptr uEnd = reinterpret_cast<quintptr>(&copy.constLast() + 1);
-        pRefills->append(copy);
-        if (uId >= uBegin && uId < uEnd)
+        Container vecCopy = source;
+        vecCopy.detach();
+        const quintptr uCopyBegin = reinterpret_cast<quintptr>(&vecCopy.constFirst());
+        const quintptr uCopyEnd = reinterpret_cast<quintptr>(&vecCopy.constLast() + 1);
+        refills->append(vecCopy);
+        if (uIdAddress >= uCopyBegin && uIdAddress < uCopyEnd)
             return;
     }
 }
@@ -1422,7 +1422,8 @@ private slots:
         layout = GraphLayoutOutput();   // 위젯만 그 배치를 갖게 한다: 신호 안의 SetGraph 가 옛 배치 저장소를 푼다
         QStringList vecFirst;
         QStringList vecSecond;
-        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, ptNode, replacement, EGraphLayoutType::NETWORK, false, &vecFirst, &vecSecond);
+        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, ptNode, replacement, EGraphLayoutType::NETWORK,
+                            &GraphLayoutOutput::vecNodes, &vecFirst, &vecSecond);
         QCOMPARE(vecSecond, QStringList { DecodeUtf8(kYolov2Id) });
         QCOMPARE(vecFirst, QStringList { DecodeUtf8(kYolov2Id) });
     }
@@ -1445,7 +1446,8 @@ private slots:
         layout = GraphLayoutOutput();
         QStringList vecFirst;
         QStringList vecSecond;
-        ClickReplacingGraph(view, &KnowledgeGraphView::DocumentActivated, ptDocument, replacement, EGraphLayoutType::BIPARTITE, false, &vecFirst, &vecSecond);
+        ClickReplacingGraph(view, &KnowledgeGraphView::DocumentActivated, ptDocument, replacement, EGraphLayoutType::BIPARTITE,
+                            &GraphLayoutOutput::vecNodes, &vecFirst, &vecSecond);
         QCOMPARE(vecSecond, QStringList { strDocumentId });
         QCOMPARE(vecFirst, QStringList { strDocumentId });
     }
@@ -1464,10 +1466,12 @@ private slots:
         view.SetGraph(m_graph, layout, EGraphLayoutType::TIMELINE);
         const QRectF rectItem = view.GetUnplacedItemRect(kUnplacedPick);
         QVERIFY(!rectItem.isEmpty());
+        const QPoint ptItem = rectItem.center().toPoint();
         layout = GraphLayoutOutput();
         QStringList vecFirst;
         QStringList vecSecond;
-        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, rectItem.center().toPoint(), replacement, EGraphLayoutType::TIMELINE, true, &vecFirst, &vecSecond);
+        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, ptItem, replacement, EGraphLayoutType::TIMELINE,
+                            &GraphLayoutOutput::vecUnplaced, &vecFirst, &vecSecond);
         QCOMPARE(vecSecond, QStringList { strUnplacedId });
         QCOMPARE(vecFirst, QStringList { strUnplacedId });
     }
@@ -1547,31 +1551,26 @@ private:
         return layout;
     }
 
-    // L10: pos 를 누른다. 첫 받는 쪽은 신호 안에서 replacement 를 넣고(SetGraph), 풀린 저장소를 replacement 의 사본으로 덮은 뒤
-    // (unplaced 면 연도 없음 목록, 아니면 점 목록) 받은 id 를 pFirst 에 적는다. 그다음에 이은 받는 쪽은 받은 id 를 pSecond 에 적는다.
-    // 사본은 두 받는 쪽이 다 받을 때까지 둔다. 이음은 이 함수가 끝나면 끊는다
+    // L10: pos 를 누른다. 첫 받는 쪽은 신호 안에서 replacement 를 넣고(SetGraph), 풀린 배치 저장소(storage: 점 목록 · 연도 없음 목록)를
+    // replacement 의 같은 목록 사본으로 덮은 뒤 받은 id 를 first 에 적는다. 그 뒤에 이은 받는 쪽은 받은 id 를 second 에 적는다.
+    // 사본은 두 받는 쪽이 모두 적을 때까지 둔다. 이음은 이 함수가 끝나면 끊는다
+    template <typename Container>
     void ClickReplacingGraph(KnowledgeGraphView& view, void (KnowledgeGraphView::*signal)(const QString&), const QPoint& pos,
-                             const GraphLayoutOutput& replacement, EGraphLayoutType type, bool unplaced, QStringList* pFirst,
-                             QStringList* pSecond) const
+                             const GraphLayoutOutput& replacement, EGraphLayoutType type, Container GraphLayoutOutput::*storage,
+                             QStringList* first, QStringList* second) const
     {
-        QVector<QVector<LayoutNode>> vecNodeRefills;
-        QVector<QStringList> vecUnplacedRefills;
-        // 사본을 둘 자리를 미리 잡는다(사본을 두다가 늘어나는 자리가 풀린 저장소를 잡지 않게)
-        if (unplaced)
-            vecUnplacedRefills.reserve(kMaxRefills);
-        else
-            vecNodeRefills.reserve(kMaxRefills);
+        QVector<Container> vecRefills;
+        vecRefills.reserve(kMaxRefills);   // 사본을 둘 자리를 미리 잡는다(사본을 두다가 늘어나는 자리가 풀린 저장소를 잡지 않게)
         QObject receiver;
-        connect(&view, signal, &receiver,
-                [this, &view, &replacement, type, unplaced, &vecNodeRefills, &vecUnplacedRefills, pFirst](const QString& id) {
-                    view.SetGraph(m_graph, replacement, type);
-                    if (unplaced)
-                        RefillFreedStorage(&id, replacement.vecUnplaced, &vecUnplacedRefills);
-                    else
-                        RefillFreedStorage(&id, replacement.vecNodes, &vecNodeRefills);
-                    *pFirst << id;   // 자기 SetGraph 뒤에도 받은 id 를 읽는다
-                });
-        connect(&view, signal, &receiver, [pSecond](const QString& id) { *pSecond << id; });
+        const auto funcReplaceGraph = [this, &view, &replacement, type, storage, &vecRefills, first](const QString& id)
+        {
+            view.SetGraph(m_graph, replacement, type);
+            RefillFreedStorage(&id, replacement.*storage, &vecRefills);
+            *first << id;   // 자기 SetGraph 뒤에도 받은 id 를 읽는다
+        };
+        const auto funcRecord = [second](const QString& id) { *second << id; };
+        connect(&view, signal, &receiver, funcReplaceGraph);
+        connect(&view, signal, &receiver, funcRecord);
         QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, pos);
     }
 

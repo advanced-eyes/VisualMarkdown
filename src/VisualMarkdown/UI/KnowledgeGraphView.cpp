@@ -983,7 +983,7 @@ void KnowledgeGraphView::HandleClick(const QPoint& pos)
     {
         SelectNode(iNode);
         const LayoutNode& node = m_layout.vecNodes[iNode];
-        const QString strId = node.strId;   // 받는 쪽이 SetGraph 를 불러도(배치를 풀어도) 뒤에 받는 쪽이 누른 id 를 받게 복사한다
+        const QString strId = node.strId;   // 받는 쪽이 SetGraph 를 불러도 남게 복사한다(배치 안 글을 그대로 실으면 SetGraph 가 푼다)
         if (node.bDocument)
             emit DocumentActivated(strId);
         else
