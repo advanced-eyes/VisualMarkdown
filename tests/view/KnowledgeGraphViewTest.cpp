@@ -120,6 +120,32 @@ constexpr int kUnplacedPick = 2;                // 밖에서 고르는 연도 �
 constexpr int kLegendProbeStep = 4;             // 범례가 있던 자리에서 점이 없는 곳을 찾는 걸음(px)
 constexpr int kZoomIntoCorner = 6;              // 왼쪽 위 구석으로 휠을 이만큼 돌리면 점 대부분이 위젯 밖이다
 
+// 신호 안에서 SetGraph 를 불러도 id 를 복사해 낸다(L10)
+constexpr const char* kRenamedPrefix = "other-";   // 신호 안에서 넣는 배치는 id 마다 이 글을 앞에 붙인다
+constexpr int kMaxRefills = 4096;                  // 풀린 저장소를 덮을 때까지 만드는 사본 수의 위
+
+// L10: source 의 사본(떼어 내 새 저장소를 잡은 것)을 만들어 pRefills 에 둔다. 사본 하나의 원소 자리가 받은 id 의 자리(pId)를 덮으면,
+// 또는 kMaxRefills 개가 되면 그친다. source 는 누른 배치와 같은 배치를 이름만 바꾼 것이라 저장소 크기가 같고, 같은 크기 블록은
+// 막 풀린 블록을 다시 쓴다. 그래서 배치 안 id 의 참조를 그대로 실은 신호는 그 자리에서 사본의 id(앞에 kRenamedPrefix)를 읽어 틀린다.
+// 풀린 메모리가 우연히 그대로 남아 시험이 통과하는 일을 막는다. 복사해 실은 id 는 스택에 있어 덮이지 않는다(그때는 kMaxRefills 개를 만든다)
+template <typename Container>
+void RefillFreedStorage(const QString* pId, const Container& source, QVector<Container>* pRefills)
+{
+    if (source.isEmpty())
+        return;
+    const quintptr uId = reinterpret_cast<quintptr>(pId);
+    while (pRefills->size() < kMaxRefills)
+    {
+        Container copy = source;
+        copy.detach();
+        const quintptr uBegin = reinterpret_cast<quintptr>(&copy.constFirst());
+        const quintptr uEnd = reinterpret_cast<quintptr>(&copy.constLast() + 1);
+        pRefills->append(copy);
+        if (uId >= uBegin && uId < uEnd)
+            return;
+    }
+}
+
 QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
 
 // 설명은 긴 줄을 빈칸에서 접으므로 견줄 때는 빈칸 · 줄바꿈을 모두 지운다
@@ -1380,6 +1406,72 @@ private slots:
         QCOMPARE(spyCleared.count(), 1);
     }
 
+    // L10: 개념 점을 누르면, 첫 받는 쪽이 신호 안에서 SetGraph 로 다른 배치를 넣어도 받는 쪽 모두가 누른 개념 id 를 받는다
+    void conceptSignalSurvivesSetGraphInSlot()
+    {
+        const GraphLayoutOutput replacement = MakeRenamedLayout(EGraphLayoutType::NETWORK);
+        QVERIFY(!replacement.vecNodes.isEmpty());
+        GraphLayoutOutput layout;
+        QVERIFY(ViewTestSupport::RunLayout(m_graph, EGraphLayoutType::NETWORK, &layout));   // 고정 배치와 저장소를 나누지 않는 새 배치
+        const int iNode = FindNode(layout, DecodeUtf8(kYolov2Id));
+        QVERIFY(iNode >= 0);
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::NETWORK);
+        const QPoint ptNode = view.MapToWidget(layout.vecNodes[iNode].center).toPoint();
+        layout = GraphLayoutOutput();   // 위젯만 그 배치를 갖게 한다: 신호 안의 SetGraph 가 옛 배치 저장소를 푼다
+        QStringList vecFirst;
+        QStringList vecSecond;
+        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, ptNode, replacement, EGraphLayoutType::NETWORK, false, &vecFirst, &vecSecond);
+        QCOMPARE(vecSecond, QStringList { DecodeUtf8(kYolov2Id) });
+        QCOMPARE(vecFirst, QStringList { DecodeUtf8(kYolov2Id) });
+    }
+
+    // L10: 문서 ↔ 개념에서 문서 점을 누르면, 첫 받는 쪽이 신호 안에서 SetGraph 를 불러도 받는 쪽 모두가 누른 문서 id 를 받는다
+    void documentSignalSurvivesSetGraphInSlot()
+    {
+        const GraphLayoutOutput replacement = MakeRenamedLayout(EGraphLayoutType::BIPARTITE);
+        QVERIFY(!replacement.vecNodes.isEmpty());
+        GraphLayoutOutput layout;
+        QVERIFY(ViewTestSupport::RunLayout(m_graph, EGraphLayoutType::BIPARTITE, &layout));
+        const int iDocument = FindDocumentNode(layout, DecodeUtf8(kYolo9000Title));
+        QVERIFY(iDocument >= 0);
+        const QString strDocumentId = layout.vecNodes[iDocument].strId;
+        QVERIFY(!strDocumentId.isEmpty());
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::BIPARTITE);
+        const QPoint ptDocument = view.MapToWidget(layout.vecNodes[iDocument].center).toPoint();
+        layout = GraphLayoutOutput();
+        QStringList vecFirst;
+        QStringList vecSecond;
+        ClickReplacingGraph(view, &KnowledgeGraphView::DocumentActivated, ptDocument, replacement, EGraphLayoutType::BIPARTITE, false, &vecFirst, &vecSecond);
+        QCOMPARE(vecSecond, QStringList { strDocumentId });
+        QCOMPARE(vecFirst, QStringList { strDocumentId });
+    }
+
+    // L10: 타임라인 연도 없음 목록 줄을 누르면, 첫 받는 쪽이 신호 안에서 SetGraph 를 불러도 받는 쪽 모두가 그 줄의 개념 id 를 받는다
+    void unplacedSignalSurvivesSetGraphInSlot()
+    {
+        const GraphLayoutOutput replacement = MakeRenamedLayout(EGraphLayoutType::TIMELINE);
+        QVERIFY(!replacement.vecUnplaced.isEmpty());
+        GraphLayoutOutput layout;
+        QVERIFY(ViewTestSupport::RunLayout(m_graph, EGraphLayoutType::TIMELINE, &layout));
+        QVERIFY(layout.vecUnplaced.size() > kUnplacedPick);
+        const QString strUnplacedId = layout.vecUnplaced[kUnplacedPick];
+        KnowledgeGraphView view;
+        view.resize(ViewTestSupport::kSnapshotWidth, ViewTestSupport::kSnapshotHeight);
+        view.SetGraph(m_graph, layout, EGraphLayoutType::TIMELINE);
+        const QRectF rectItem = view.GetUnplacedItemRect(kUnplacedPick);
+        QVERIFY(!rectItem.isEmpty());
+        layout = GraphLayoutOutput();
+        QStringList vecFirst;
+        QStringList vecSecond;
+        ClickReplacingGraph(view, &KnowledgeGraphView::ConceptActivated, rectItem.center().toPoint(), replacement, EGraphLayoutType::TIMELINE, true, &vecFirst, &vecSecond);
+        QCOMPARE(vecSecond, QStringList { strUnplacedId });
+        QCOMPARE(vecFirst, QStringList { strUnplacedId });
+    }
+
     // 빈 배치 · 맞지 않는 그래프도 죽지 않고 그린다
     void emptyLayoutDoesNotCrash()
     {
@@ -1440,6 +1532,47 @@ private:
             if (layout.vecNodes[iNode].bDocument && layout.vecNodes[iNode].strLabel == title)
                 return iNode;
         return -1;
+    }
+
+    // L10: type 배치를 새로 만들고 점 · 연도 없음 id 마다 앞에 kRenamedPrefix 를 붙인다(누르는 배치와 저장소 크기가 같은 다른 배치)
+    GraphLayoutOutput MakeRenamedLayout(EGraphLayoutType type) const
+    {
+        GraphLayoutOutput layout;
+        if (!ViewTestSupport::RunLayout(m_graph, type, &layout))
+            return GraphLayoutOutput();
+        for (LayoutNode& node : layout.vecNodes)
+            node.strId.prepend(DecodeUtf8(kRenamedPrefix));
+        for (QString& strId : layout.vecUnplaced)
+            strId.prepend(DecodeUtf8(kRenamedPrefix));
+        return layout;
+    }
+
+    // L10: pos 를 누른다. 첫 받는 쪽은 신호 안에서 replacement 를 넣고(SetGraph), 풀린 저장소를 replacement 의 사본으로 덮은 뒤
+    // (unplaced 면 연도 없음 목록, 아니면 점 목록) 받은 id 를 pFirst 에 적는다. 그다음에 이은 받는 쪽은 받은 id 를 pSecond 에 적는다.
+    // 사본은 두 받는 쪽이 다 받을 때까지 둔다. 이음은 이 함수가 끝나면 끊는다
+    void ClickReplacingGraph(KnowledgeGraphView& view, void (KnowledgeGraphView::*signal)(const QString&), const QPoint& pos,
+                             const GraphLayoutOutput& replacement, EGraphLayoutType type, bool unplaced, QStringList* pFirst,
+                             QStringList* pSecond) const
+    {
+        QVector<QVector<LayoutNode>> vecNodeRefills;
+        QVector<QStringList> vecUnplacedRefills;
+        // 사본을 둘 자리를 미리 잡는다(사본을 두다가 늘어나는 자리가 풀린 저장소를 잡지 않게)
+        if (unplaced)
+            vecUnplacedRefills.reserve(kMaxRefills);
+        else
+            vecNodeRefills.reserve(kMaxRefills);
+        QObject receiver;
+        connect(&view, signal, &receiver,
+                [this, &view, &replacement, type, unplaced, &vecNodeRefills, &vecUnplacedRefills, pFirst](const QString& id) {
+                    view.SetGraph(m_graph, replacement, type);
+                    if (unplaced)
+                        RefillFreedStorage(&id, replacement.vecUnplaced, &vecUnplacedRefills);
+                    else
+                        RefillFreedStorage(&id, replacement.vecNodes, &vecNodeRefills);
+                    *pFirst << id;   // 자기 SetGraph 뒤에도 받은 id 를 읽는다
+                });
+        connect(&view, signal, &receiver, [pSecond](const QString& id) { *pSecond << id; });
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, pos);
     }
 
     // 배치 선 가운데 그래프 선이 (from · 종류 · to) 인 것

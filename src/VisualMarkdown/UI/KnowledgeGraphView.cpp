@@ -983,17 +983,19 @@ void KnowledgeGraphView::HandleClick(const QPoint& pos)
     {
         SelectNode(iNode);
         const LayoutNode& node = m_layout.vecNodes[iNode];
+        const QString strId = node.strId;   // 받는 쪽이 SetGraph 를 불러도(배치를 풀어도) 뒤에 받는 쪽이 누른 id 를 받게 복사한다
         if (node.bDocument)
-            emit DocumentActivated(node.strId);
+            emit DocumentActivated(strId);
         else
-            emit ConceptActivated(node.strId);
+            emit ConceptActivated(strId);
         return;
     }
     const int iUnplaced = FindUnplacedAt(pos);
     if (iUnplaced >= 0)
     {
         SelectUnplaced(iUnplaced);
-        emit ConceptActivated(m_layout.vecUnplaced[iUnplaced]);
+        const QString strId = m_layout.vecUnplaced[iUnplaced];   // 받는 쪽이 SetGraph 를 불러도 남게 복사한다
+        emit ConceptActivated(strId);
         return;
     }
     if (IsOnPanel(pos))

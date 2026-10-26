@@ -66,6 +66,8 @@ public:
     bool IsLegendVisible() const;
 
 signals:
+    // 사용자가 개념 점(연도 없음 목록 줄 포함) · 문서 점을 눌러(끌기가 아닌 누르기) 그 점을 고른 뒤 낸다.
+    // id 는 복사해 싣는다: 받는 쪽이 신호 안에서 SetGraph 를 불러도 뒤에 받는 쪽이 누른 id 를 받는다
     void ConceptActivated(const QString& conceptId);
     void DocumentActivated(const QString& documentId);
     // 사용자가 빈 곳(점 · 연도 없음 목록 줄 · 범례 판 · 목록 판 밖)을 눌러(끌기가 아닌 누르기) 고른 것을 지운 뒤 낸다. 고른 것이 없었어도 낸다.
