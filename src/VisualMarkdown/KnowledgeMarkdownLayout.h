@@ -53,6 +53,12 @@ namespace KnowledgeMarkdownLayout
 QString Normalize(const QString& text);
 KnowledgeLayout Scan(const QString& text);
 bool IsFenceLine(const QString& line);
+// lines[open](울타리 줄)이 여는 울타리 블록의 끝 줄. 같은 글자로 시작하는 울타리 줄이 닫는다. 들여 쓴 울타리
+// (여는 줄 들여쓰기 k ≥ 1)는 k 보다 덜 들인 비지 않은 줄이 먼저 나오면 그 줄 앞에서 저절로 닫힌다(CommonMark:
+// 목록 항목이 끝나면 그 안 코드도 닫힌다). end 앞까지 닫히지 않으면 -1. Scan 이 제목 · 절을 찾을 때 이 규칙을 쓴다.
+int FindFenceEnd(const QStringList& lines, int open, int end);
+// lines 끝까지 열린 채로 남는 울타리의 여는 줄 번호(FindFenceEnd 규칙). 없으면 -1.
+int FindOpenFence(const QStringList& lines);
 // 한 줄 문단으로 쓸 글(한 줄 · 정의)이 블록(그림 · 인용 · 목록 · 표 · HTML · 울타리 · 제목 · 구분선)을 여는 줄로
 // 읽히지 않게 GFM 이스케이프 \ 하나를 넣는다(`\<` `\-` `\#` …, 번호 목록은 `1\.`). Scan 은 한 줄을 읽을 때 그 \ 하나를 뺀다.
 QString EscapeParagraphStart(const QString& text);

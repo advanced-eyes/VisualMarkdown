@@ -50,29 +50,15 @@ QString GetLeadingWhitespace(const QString& line)
     return line.left(iEnd);
 }
 
-// lines[first] 부터 울타리를 파일 훑기(KnowledgeMarkdownLayout::Scan)와 같은 규칙으로 짝짓는다:
-// 울타리 밖의 울타리 줄이 열고, 같은 글자로 시작하는 울타리 줄이 닫는다. 끝까지 닫히지 않았으면
-// 여는 줄의 들여쓰기 + 같은 글자 셋으로 닫는 줄을 더한다(파일의 뒤 절이 코드 안으로 들어가지 않게).
+// lines[first] 부터 울타리를 파일 훑기(KnowledgeMarkdownLayout::FindFenceEnd)와 같은 규칙으로 짝짓는다.
+// 끝까지 열린 울타리가 남으면 여는 줄의 들여쓰기 + 같은 글자 셋으로 닫는 줄을 더한다.
 void CloseOpenFence(QStringList* lines, int first)
 {
-    int iOpen = -1;
-    QChar chFence;
-    for (int iLine = first; iLine < lines->size(); ++iLine)
-    {
-        const QString& strLine = lines->at(iLine);
-        if (!KnowledgeMarkdownLayout::IsFenceLine(strLine))
-            continue;
-        const QChar chThis = strLine.trimmed().at(0);
-        if (iOpen < 0)
-        {
-            iOpen = iLine;
-            chFence = chThis;
-        }
-        else if (chThis == chFence)
-            iOpen = -1;
-    }
-    if (iOpen >= 0)
-        *lines << GetLeadingWhitespace(lines->at(iOpen)) + QString(kFenceMarkLength, chFence);
+    const int iOpen = KnowledgeMarkdownLayout::FindOpenFence(lines->mid(first));
+    if (iOpen < 0)
+        return;
+    const QString strOpen = lines->at(first + iOpen);
+    *lines << GetLeadingWhitespace(strOpen) + QString(kFenceMarkLength, strOpen.trimmed().at(0));
 }
 
 // column 칸에 있는 들여쓰기 글자 ch 다음의 칸. 공백은 한 칸, 탭은 다음 4의 배수 칸까지다(CommonMark).

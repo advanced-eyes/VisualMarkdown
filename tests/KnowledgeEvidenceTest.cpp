@@ -1,3 +1,4 @@
+#include "VisualMarkdown/KnowledgeMarkdownLayout.h"
 #include "VisualMarkdown/KnowledgeMarkdownReader.h"
 #include "VisualMarkdown/KnowledgeMarkdownWriter.h"
 #include "VisualMarkdown/KnowledgeText.h"
@@ -82,6 +83,27 @@ QString VerifyRoundTrip(const KnowledgeDocument& document, int expectedFormat)
         || KnowledgeMarkdownWriter::WriteDocument(read.document) != strText)
         return QString();
     return strText;
+}
+
+// 손 글 text(정준 글의 관계 하나 · 표 하나를 그대로 둔 것)를 두 번 다시 써도 관계 · 표가 그대로 읽히고,
+// 카드가 처음 읽은 것과 같고, 두 번째 쓰기부터 바이트가 같은지 본다. 맞으면 빈 글, 아니면 까닭과 쓴 글.
+QString CheckRewriteKeepsSections(const QString& text)
+{
+    const auto funcSections = [](const DocumentReadResult& read)
+    {
+        return read.document.vecRelations.size() == 1 && read.document.vecTables.size() == 1;
+    };
+    const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(text);
+    if (!funcSections(read))
+        return QStringLiteral("read lost sections\n") + text;
+    const QString strFirst = KnowledgeMarkdownWriter::WriteDocument(read.document, text);
+    const DocumentReadResult first = KnowledgeMarkdownReader::ReadDocument(strFirst);
+    if (!funcSections(first) || first.document.vecCards != read.document.vecCards)
+        return QStringLiteral("first rewrite changed the record\n") + strFirst;
+    const QString strSecond = KnowledgeMarkdownWriter::WriteDocument(first.document, strFirst);
+    if (strSecond != strFirst)
+        return QStringLiteral("second rewrite differs\n") + strSecond;
+    return QString();
 }
 }
 
@@ -425,82 +447,162 @@ private slots:
         }
     }
 
-    // 손으로 쓴 근거 안 울타리: 절 안에서 닫히면 닫는 줄까지는 빈 줄 · 들여쓰기와 상관없이 근거다(파일 훑기가 코드로 보는 범위와 같다).
-    // 뗄 들여쓰기는 있는 만큼만 뗀다.
-    void handWrittenFenceRunsToItsClose()
+    // 손으로 쓴 근거 안 울타리도 들여쓰기 규칙을 따른다. 울타리 안의 빈 줄 · 더 들인 줄은 근거이고, 근거보다 덜 들인 줄은
+    // 울타리 안이라도 근거를 끝낸다(CommonMark: 목록 항목이 끝나면 그 안 코드도 닫힌다). 파일 훑기도 그 줄 앞에서 울타리를 닫는다.
+    void handWrittenFenceEndsWithItsItem()
     {
-        const QString strText = ReplaceCards(DecodeUtf8(
+        const QString strInside = ReplaceCards(DecodeUtf8(
+            "- 카드 <!-- card:7f3a2c1e -->\n"
+            "  - 근거: 설명\n"
+            "    ```\n"
+            "    x = 1\n"
+            "\n"
+            "        y = 2\n"
+            "    ```\n"
+            "  - 절: 2\n"));
+        const DocumentReadResult inside = KnowledgeMarkdownReader::ReadDocument(strInside);
+        QCOMPARE(inside.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\nx = 1\n\n    y = 2\n```"));
+        QCOMPARE(inside.document.vecCards[0].strSection, QString("2"));
+        QVERIFY(inside.hashUnreadLines.isEmpty());
+        QVERIFY2(CheckRewriteKeepsSections(strInside).isEmpty(), qUtf8Printable(CheckRewriteKeepsSections(strInside)));
+
+        const QString strShallow = ReplaceCards(DecodeUtf8(
             "- 카드 <!-- card:7f3a2c1e -->\n"
             "  - 근거: 설명\n"
             "    ```\n"
             "x = 1\n"
-            "\n"
-            "  y = 2\n"
-            "- 목록처럼 보이는 코드\n"
             "    ```\n"
             "  - 절: 2\n"));
-        const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
-        QVERIFY(read.bOk);
-        QCOMPARE(read.document.vecCards.size(), 1);
-        QCOMPARE(read.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\nx = 1\n\ny = 2\n- 목록처럼 보이는 코드\n```"));
-        QCOMPARE(read.document.vecCards[0].strSection, QString("2"));
-        QVERIFY(read.hashUnreadLines.isEmpty());
-        QCOMPARE(read.document.vecRelations.size(), 1);
-
-        const QString strWritten = KnowledgeMarkdownWriter::WriteDocument(read.document, strText);
-        const DocumentReadResult reread = KnowledgeMarkdownReader::ReadDocument(strWritten);
-        QVERIFY(reread.document.vecCards == read.document.vecCards);
-        QVERIFY(reread.document.vecRelations == read.document.vecRelations);
-        QVERIFY(reread.hashUnreadLines.isEmpty());
+        const DocumentReadResult shallow = KnowledgeMarkdownReader::ReadDocument(strShallow);
+        QCOMPARE(shallow.document.vecCards.size(), 1);
+        QCOMPARE(shallow.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\n```"));
+        QVERIFY(shallow.document.vecCards[0].strSection.isEmpty());
+        QCOMPARE(shallow.hashUnreadLines.value(DecodeUtf8("지식")),
+                 QStringList({ DecodeUtf8("x = 1"), DecodeUtf8("    ```"), DecodeUtf8("  - 절: 2") }));
+        QVERIFY2(CheckRewriteKeepsSections(strShallow).isEmpty(), qUtf8Printable(CheckRewriteKeepsSections(strShallow)));
     }
 
-    // 손으로 쓴 근거의 닫히지 않은 울타리는 다음 카드(id 주석이 있는 첫 줄)나 덜 들인 아는 하위 항목(`- 절:` 등)을 넘어
-    // 닫는 줄을 찾지 않는다. 들여쓰기 규칙대로 읽고, 다시 쓸 때 닫는 줄을 더한다(Obsidian 에서도 목록 항목이 끝나면 코드가 닫힌다).
-    void unclosedFenceDoesNotSwallowNextCard()
+    // 손으로 쓴 근거의 닫는 울타리가 형제 하위 항목 뒤에 오면, 그 줄은 읽지 못한 줄로 절 끝에 옮겨진다.
+    // 옮겨진 들여 쓴 울타리는 뒤 `## ` 줄 앞에서 닫히므로 한 번 · 두 번 다시 써도 관계 · 표가 그대로다(빈 줄을 끼워도 같다).
+    void movedStrayFenceDoesNotSwallowSections()
     {
-        // 두 카드 모두 울타리를 닫지 않았다. 파일 훑기는 첫 카드의 ``` 를 둘째 카드의 ```python 로 닫는다고 본다(뒤 절은 그대로 읽힌다).
-        const QString strText = ReplaceCards(DecodeUtf8(
+        for (const QString& strGap : { QString(), QStringLiteral("\n") })
+        {
+            const QString strText = ReplaceCards(DecodeUtf8(
+                "- 카드 하나 <!-- card:7f3a2c1e -->\n"
+                "  - 근거: 설명\n"
+                "    ```\n"
+                "    x = 1\n") + strGap + DecodeUtf8(
+                "  - 절: 2\n"
+                "    ```\n"));
+            const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
+            QCOMPARE(read.document.vecCards.size(), 1);
+            QCOMPARE(read.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\nx = 1\n```"));
+            QCOMPARE(read.document.vecCards[0].strSection, strGap.isEmpty() ? QString("2") : QString());
+            const QString strWhy = CheckRewriteKeepsSections(strText);
+            QVERIFY2(strWhy.isEmpty(), qUtf8Printable(strWhy));
+
+            const QString strWritten = KnowledgeMarkdownWriter::WriteDocument(read.document, strText);
+            QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strWritten).hashUnreadLines, read.hashUnreadLines);
+        }
+    }
+
+    // 손으로 쓴 근거의 닫히지 않은 울타리는 그 근거가 끝나는 줄(형제 하위 항목 · 다음 카드 · 절 제목) 앞에서 닫힌다.
+    // 뒤 카드의 울타리와 짝지어지지 않으므로 뒤 카드 · 절을 삼키지 않는다. 다시 쓸 때 근거에 닫는 줄을 더한다.
+    void unclosedFenceClosesWithItsItem()
+    {
+        const QString strUnclosed = DecodeUtf8(
             "- 카드 하나 <!-- card:7f3a2c1e -->\n"
             "  - 근거: 설명\n"
             "    ```\n"
             "    x = 1\n"
-            "  - 절: 2\n"
-            "- 카드 둘 <!-- card:0a1b2c3d -->\n"
-            "  - 근거: 둘째 설명\n"
-            "    ```python\n"
-            "    y = 2\n"
-            "  - 절: 3\n"));
-        const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
-        QVERIFY(read.bOk);
-        QCOMPARE(read.document.vecCards.size(), 2);
-        QCOMPARE(read.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\nx = 1\n```"));
-        QCOMPARE(read.document.vecCards[0].strSection, QString("2"));
-        QCOMPARE(read.document.vecCards[1].strEvidence, DecodeUtf8("둘째 설명\n```python\ny = 2\n```"));
-        QCOMPARE(read.document.vecCards[1].strSection, QString("3"));
-        QCOMPARE(read.document.vecRelations.size(), 1);
-        QVERIFY(read.hashUnreadLines.isEmpty());
+            "  - 절: 2\n");
+        const QVector<QPair<QString, QString>> vecSeconds {
+            { QString(), QString() },   // 닫지 않은 카드 하나뿐
+            { DecodeUtf8("- 카드 둘 <!-- card:0a1b2c3d -->\n  - 근거: 둘째 설명\n    ```python\n    y = 2\n    ```\n  - 절: 3\n"),
+              DecodeUtf8("둘째 설명\n```python\ny = 2\n```") },   // 뒤 카드는 닫혔다
+            { DecodeUtf8("- 카드 둘 <!-- card:0a1b2c3d -->\n  - 근거: 둘째 설명\n    ```python\n    y = 2\n  - 절: 3\n"),
+              DecodeUtf8("둘째 설명\n```python\ny = 2\n```") },   // 뒤 카드도 닫지 않았다
+            { DecodeUtf8("- 카드 둘 <!-- card:0a1b2c3d -->\n  - 근거: 둘째 설명\n  - 절: 3\n\n    ```\n"),
+              DecodeUtf8("둘째 설명") },                          // 절 끝에 들여 쓴 울타리 줄 하나
+        };
+        for (const QPair<QString, QString>& pairSecond : vecSeconds)
+        {
+            const QString strText = ReplaceCards(strUnclosed + pairSecond.first);
+            const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
+            QVERIFY(read.bOk);
+            QCOMPARE(read.document.vecCards.size(), pairSecond.first.isEmpty() ? 1 : 2);
+            QCOMPARE(read.document.vecCards[0].strEvidence, DecodeUtf8("설명\n```\nx = 1\n```"));
+            QCOMPARE(read.document.vecCards[0].strSection, QString("2"));
+            if (!pairSecond.first.isEmpty())
+            {
+                QCOMPARE(read.document.vecCards[1].strEvidence, pairSecond.second);
+                QCOMPARE(read.document.vecCards[1].strSection, QString("3"));
+            }
+            QCOMPARE(read.document.vecRelations.size(), 1);
+            QCOMPARE(read.document.vecTables.size(), 1);
+            const QString strWhy = CheckRewriteKeepsSections(strText);
+            QVERIFY2(strWhy.isEmpty(), qUtf8Printable(strWhy));
+        }
+    }
 
-        // 카드 구조 줄이 없으면 덜 들인 줄을 넘어 닫는 줄까지가 근거다(위 handWrittenFenceRunsToItsClose). id 없는 `- ` 줄은 카드 구조가 아니다.
-        const DocumentReadResult bare = KnowledgeMarkdownReader::ReadDocument(ReplaceCards(DecodeUtf8(
+    // 파일 훑기의 울타리: 들여 쓴 울타리(여는 줄 들여쓰기 k ≥ 1)는 k 보다 덜 들인 비지 않은 줄 앞에서 저절로 닫힌다.
+    // 맨 바깥 울타리(들여쓰기 0)는 지금처럼 같은 글자 울타리 줄에서만 닫힌다.
+    void scanClosesIndentedFenceAtShallowerLine()
+    {
+        const auto funcNames = [](const QString& tail)
+        {
+            QStringList vecNames;
+            for (const KnowledgeSectionRange& section : KnowledgeMarkdownLayout::Scan(KnowledgeTestData::CanonicalDocument() + tail).vecSections)
+                vecNames << section.strName;
+            return vecNames;
+        };
+        // 목록 안 울타리 뒤의 들여 쓰지 않은 ## 줄은 절이다
+        QVERIFY(funcNames(DecodeUtf8("\n## 내 메모\n\n- 목록\n  ```\n  코드\n\n## 둘째 메모\n\n글\n")).contains(DecodeUtf8("둘째 메모")));
+        // 덜 들인 닫는 줄은 그 앞에서 울타리를 닫고 새 울타리(들여쓰기 2)를 연다. 그 울타리도 ## 줄 앞에서 닫힌다
+        QVERIFY(funcNames(DecodeUtf8("\n## 내 메모\n\n- 목록\n    ```\n  ```\n## 둘째 메모\n")).contains(DecodeUtf8("둘째 메모")));
+        // 더 들인 줄 · 빈 줄 · 다른 글자 울타리는 들여 쓴 울타리를 닫지 않는다. 그 뒤 맨 바깥 울타리 안의 ## 줄은 절이 아니다
+        const QStringList vecPaired = funcNames(DecodeUtf8("\n## 내 메모\n\n- 목록\n  ```\n    ~~~\n\n  ```\n```\n## 아님\n```\n## 둘째 메모\n"));
+        QVERIFY(vecPaired.contains(DecodeUtf8("둘째 메모")));
+        QVERIFY(!vecPaired.contains(DecodeUtf8("아님")));
+        // 맨 바깥 울타리는 그대로: 닫지 않으면 뒤 ## 줄을 절로 보지 않고, 들여 쓴 같은 글자 줄로도 닫힌다
+        const QStringList vecOpen = funcNames(DecodeUtf8("\n## 내 메모\n\n```\n코드\n## 아님\n"));
+        QCOMPARE(vecOpen.last(), DecodeUtf8("내 메모"));
+        const QStringList vecIndentedClose = funcNames(DecodeUtf8("\n## 내 메모\n\n```\n## 아님\n  ```\n## 둘째 메모\n"));
+        QVERIFY(vecIndentedClose.contains(DecodeUtf8("둘째 메모")));
+        QVERIFY(!vecIndentedClose.contains(DecodeUtf8("아님")));
+
+        // 한 줄 찾기도 같은 규칙으로 울타리를 건너뛴다: 목록 안의 닫지 않은 울타리 뒤 문단이 한 줄이다
+        const QString strSummary = DecodeUtf8("YOLO 에 작은 개선을 쌓아 속도를 잃지 않고 정확도를 올리고, 9000개 넘는 클래스를 검출하게 했다.");
+        QString strText = KnowledgeTestData::CanonicalDocument();
+        strText.replace(strSummary, DecodeUtf8("- 목록\n  ```\n  코드\n\n") + strSummary);
+        QCOMPARE(KnowledgeMarkdownLayout::Scan(strText).strSummary, strSummary);
+    }
+
+    // 쓰기가 만든 정해진 절 끝에 맨 바깥 울타리가 열린 채 남으면(읽지 못한 울타리 줄) 그 절 끝에 닫는 줄을 더한다.
+    // 써 낸 파일에서 어떤 정해진 절도 뒤 절을 삼키지 않는다.
+    void writerClosesTopLevelFenceAtSectionEnd()
+    {
+        // 맨 바깥 ``` 를 둘째 카드 근거의 들여 쓴 ``` 가 닫는다(파일 훑기). 읽기는 맨 바깥 줄을 읽지 못한 줄로, 들여 쓴 줄을 근거로 읽는다.
+        const QString strText = ReplaceCards(DecodeUtf8(
             "- 카드 하나 <!-- card:7f3a2c1e -->\n"
-            "  - 근거: 설명\n"
+            "  - 절: 2\n"
+            "```\n"
+            "- 카드 둘 <!-- card:0a1b2c3d -->\n"
+            "  - 근거: 둘째\n"
             "    ```\n"
-            "- 코드 속 목록\n"
-            "  - 메모: 코드 속 하위 항목처럼 보이는 줄\n"
-            "    ```\n"
-            "  - 절: 2\n")));
-        QCOMPARE(bare.document.vecCards.size(), 1);
-        QCOMPARE(bare.document.vecCards[0].strEvidence,
-                 DecodeUtf8("설명\n```\n- 코드 속 목록\n- 메모: 코드 속 하위 항목처럼 보이는 줄\n```"));
-        QCOMPARE(bare.document.vecCards[0].strSection, QString("2"));
+            "    x\n"));
+        const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
+        QCOMPARE(read.document.vecCards.size(), 2);
+        QCOMPARE(read.document.vecCards[1].strEvidence, DecodeUtf8("둘째\n```\nx\n```"));
+        QCOMPARE(read.hashUnreadLines.value(DecodeUtf8("지식")), QStringList({ QStringLiteral("```") }));
+        const QString strWhy = CheckRewriteKeepsSections(strText);
+        QVERIFY2(strWhy.isEmpty(), qUtf8Printable(strWhy));
 
-        // 다시 쓴 글은 울타리가 짝이 맞아 뒤 절이 그대로 읽힌다
         const QString strWritten = KnowledgeMarkdownWriter::WriteDocument(read.document, strText);
-        const DocumentReadResult reread = KnowledgeMarkdownReader::ReadDocument(strWritten);
-        QVERIFY(reread.document.vecCards == read.document.vecCards);
-        QCOMPARE(reread.document.vecRelations.size(), 1);
-        QCOMPARE(reread.document.vecTables.size(), 1);
-        QVERIFY(reread.hashUnreadLines.isEmpty());
+        QVERIFY2(strWritten.contains(QStringLiteral("\n\n```\n```\n\n## ")), qUtf8Printable(strWritten));
+        QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strWritten).hashUnreadLines.value(DecodeUtf8("지식")),
+                 QStringList({ QStringLiteral("```"), QStringLiteral("```") }));
     }
 
     // 관계의 하위 항목은 한 줄 그대로다: 들여 쓴 줄은 이어지는 줄이 아니라 읽지 못한 줄이다

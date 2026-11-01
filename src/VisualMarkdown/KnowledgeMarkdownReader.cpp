@@ -279,37 +279,10 @@ bool IsHeadLine(const QString& line)
     return !line.isEmpty() && !line.at(0).isSpace();
 }
 
-// 카드 구조로 보이는 줄: id 주석이 있는 카드 첫 줄, 또는 근거의 내용 들여쓰기보다 덜 들인 카드의 아는 하위 항목(근거 · 절 · 개념).
-// 손으로 쓴 근거의 울타리가 닫히지 않았을 때 이런 줄을 넘어 닫는 줄을 찾으면 뒤 카드를 삼킨다.
-bool IsCardStructureLine(const QString& line, int contentIndent)
-{
-    static const QRegularExpression reCardHead(QStringLiteral(R"re(^- .* <!-- card:[0-9a-f]{8} -->$)re"));
-    if (reCardHead.match(line).hasMatch())
-        return true;
-    QString strKey, strValue, strRaw;
-    return KnowledgeText::MeasureIndent(line) < contentIndent && ParseSubItem(line, &strKey, &strValue, &strRaw)
-        && (strKey == kKeyEvidence || strKey == kKeySection || strKey == kKeyConcepts);
-}
-
-// 근거 안 울타리 줄 open 을 닫는 줄(파일 훑기와 같은 규칙: 같은 글자로 시작하는 울타리 줄). 그 앞에 카드 구조로 보이는 줄이
-// 있거나 닫는 줄이 없으면 -1.
-int FindFenceClose(const QStringList& lines, int open, int contentIndent)
-{
-    const QChar chFence = lines[open].trimmed().at(0);
-    for (int iLine = open + 1; iLine < lines.size(); ++iLine)
-    {
-        if (KnowledgeMarkdownLayout::IsFenceLine(lines[iLine]) && lines[iLine].trimmed().at(0) == chFence)
-            return iLine;
-        if (IsCardStructureLine(lines[iLine], contentIndent))
-            return -1;
-    }
-    return -1;
-}
-
 // `- 근거:` 줄 다음(first)부터 근거의 이어지는 줄을 evidence 에 더하고, 더하지 않은 첫 줄 번호를 돌려준다.
 // 이어지는 줄 = contentIndent 칸 이상 들인 줄(그만큼 떼고 남은 들여쓰기는 지킨다). 빈 줄은 다음 비지 않은 줄이
-// 이어지는 줄일 때만 넣는다. 이어지는 줄이 울타리를 열고 카드 구조로 보이는 줄 전에 닫히면 닫는 줄까지는 빈 줄 ·
-// 들여쓰기와 상관없이 넣는다(파일 훑기가 코드로 보는 범위와 같다. 덜 들인 줄은 있는 만큼만 뗀다).
+// 이어지는 줄일 때만 넣는다. 울타리 안이어도 같다: 근거 안 울타리는 contentIndent 칸 이상 들여 써져 있어서, 파일 훑기
+// (KnowledgeMarkdownLayout::FindFenceEnd)도 그보다 덜 들인 줄 앞에서 울타리를 닫는다. 그래서 근거와 코드 범위가 엇갈리지 않는다.
 int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QStringList* evidence)
 {
     int iLine = first;
@@ -322,15 +295,8 @@ int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QS
             break;
         for (; iLine < iNext; ++iLine)
             *evidence << QString();
-        int iLast = iNext;
-        if (KnowledgeMarkdownLayout::IsFenceLine(lines[iNext]))
-        {
-            const int iClose = FindFenceClose(lines, iNext, contentIndent);
-            if (iClose >= 0)
-                iLast = iClose;
-        }
-        for (; iLine <= iLast; ++iLine)
-            *evidence << KnowledgeText::RemoveIndent(lines[iLine], contentIndent);
+        *evidence << KnowledgeText::RemoveIndent(lines[iLine], contentIndent);
+        ++iLine;
     }
     return iLine;
 }

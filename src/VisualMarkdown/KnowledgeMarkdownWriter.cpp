@@ -17,6 +17,7 @@ using UnreadLines = QHash<QString, QStringList>;
 
 constexpr int kFirstFormat = 1;               // 형식 판은 1부터다
 constexpr int kMultilineEvidenceFormat = 2;   // 여러 줄 근거가 들어온 판
+constexpr int kFenceMarkLength = 3;           // 닫는 울타리 ``` · ~~~
 
 const QString kSectionOutline = QStringLiteral("차례");
 const QString kSectionKeyNumbers = QStringLiteral("핵심 숫자");
@@ -597,6 +598,9 @@ void ApplyEdits(QStringList* lines, QVector<LineEdit> edits)
     }
 }
 
+// 읽지 못한 줄을 절 끝에 붙인다. 그래서 맨 바깥 울타리(들여쓰기 0)가 열린 채 절이 끝나면 그 절 끝에 닫는 줄을 더한다.
+// 써 낸 파일에서 정해진 절이 뒤 절을 코드로 삼키지 않게 하려는 것이다. 들여 쓴 울타리는 다음 절 제목(들여쓰기 0)
+// 앞에서 저절로 닫히므로 닫는 줄을 더하지 않는다(KnowledgeMarkdownLayout::FindFenceEnd).
 QStringList AppendUnread(const QString& name, const QStringList& section, const QStringList& unread)
 {
     if (unread.isEmpty())
@@ -604,6 +608,9 @@ QStringList AppendUnread(const QString& name, const QStringList& section, const 
     QStringList vecLines = section.isEmpty() ? QStringList { QStringLiteral("## ") + name } : section;
     vecLines << QString();
     vecLines += unread;
+    const int iOpen = KnowledgeMarkdownLayout::FindOpenFence(vecLines);
+    if (iOpen >= 0 && KnowledgeText::MeasureIndent(vecLines[iOpen]) == 0)
+        vecLines << QString(kFenceMarkLength, vecLines[iOpen].trimmed().at(0));
     return vecLines;
 }
 
