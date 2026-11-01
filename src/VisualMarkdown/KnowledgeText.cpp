@@ -15,6 +15,8 @@ constexpr int kCardIdDigits = 8;
 constexpr int kHexBase = 16;
 constexpr int kFirstDuplicateSuffix = 2;   // 겹치면 붙이는 첫 번호(id 는 "-2", 열 이름은 " 2")
 constexpr int kFenceMarkLength = 3;        // 닫는 울타리 ``` · ~~~
+constexpr int kTabStop = 4;                // 줄 앞 탭은 다음 4의 배수 칸까지(CommonMark)
+constexpr int kCodeIndent = 4;             // 이만큼 들인 줄은 들여 쓴 코드 블록이다(CommonMark)
 
 bool IsReservedName(const QString& slug)
 {
@@ -71,6 +73,48 @@ void CloseOpenFence(QStringList* lines, int first)
     }
     if (iOpen >= 0)
         *lines << GetLeadingWhitespace(lines->at(iOpen)) + QString(kFenceMarkLength, chFence);
+}
+
+// 줄 앞 공백(공백 · 탭)의 칸 수와 그 글자 수. 탭은 다음 4의 배수 칸까지 센다(CommonMark).
+int MeasureIndent(const QString& line, int* characters)
+{
+    int iColumns = 0;
+    int iIndex = 0;
+    for (; iIndex < line.size(); ++iIndex)
+    {
+        if (line[iIndex] == QLatin1Char(' '))
+            ++iColumns;
+        else if (line[iIndex] == QLatin1Char('\t'))
+            iColumns += kTabStop - iColumns % kTabStop;
+        else
+            break;
+    }
+    *characters = iIndex;
+    return iColumns;
+}
+
+// 줄이 블록을 여는가(CommonMark · GFM): 들여 쓴 코드(4칸 이상), 울타리, 목록 표지, 제목, 인용, $$ 수식, 표, 가로줄, HTML.
+// 표는 `|` 로 시작하거나, `|` 가 든 줄 다음 줄이 구분 줄(`--- | --:`)일 때다.
+bool OpensBlock(const QString& line, const QString& nextLine)
+{
+    static const QRegularExpression reMarker(QStringLiteral(
+        R"re(^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|>|\$\$|\||<[A-Za-z/!?]))re"));
+    static const QRegularExpression reBreak(QStringLiteral(R"re(^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$)re"));
+    static const QRegularExpression reDelimiterRow(QStringLiteral(R"re(^[ \t|:-]*-[ \t|:-]*$)re"));
+    int iCharacters = 0;
+    if (MeasureIndent(line, &iCharacters) >= kCodeIndent)
+        return true;
+    const QString strBody = line.mid(iCharacters);
+    if (KnowledgeMarkdownLayout::IsFenceLine(strBody) || reMarker.match(strBody).hasMatch() || reBreak.match(strBody).hasMatch())
+        return true;
+    return strBody.contains(QLatin1Char('|')) && nextLine.contains(QLatin1Char('|')) && reDelimiterRow.match(nextLine).hasMatch();
+}
+
+// 정리한 근거 줄들(둘 이상)의 첫 줄이 블록을 열면 첫 줄도 이어지는 줄처럼 쓴다(접지 않는다).
+// 접은 첫 줄이 블록을 열게 되는 경우(앞의 U+00A0 등)도 블록으로 본다. 그래야 정리를 두 번 해도 같다.
+bool StartsWithBlock(const QStringList& lines)
+{
+    return lines.size() > 1 && (OpensBlock(lines[0], lines[1]) || OpensBlock(lines[0].simplified(), lines[1]));
 }
 }
 
@@ -246,7 +290,7 @@ void CleanColumns(KnowledgeTable* table)
 
 // 앞뒤 공백 · 빈 줄을 빼고, 줄 끝 공백을 뺀다. 한 줄이면 지금처럼 이어진 공백을 하나로 접는다.
 // 여러 줄이면 첫 줄만 접고(`- 근거: ` 뒤에 쓴다) 둘째 줄부터는 들여쓰기 · 안쪽 공백을 지킨다(코드 · 목록).
-// 첫 줄이 울타리면 첫 줄도 이어지는 줄로 쓰므로 접지 않는다. 이어지는 줄의 울타리가 닫히지 않았으면 닫는 줄을 더한다.
+// 첫 줄이 블록을 열면 첫 줄도 이어지는 줄로 쓰므로 접지 않는다. 이어지는 줄의 울타리가 닫히지 않았으면 닫는 줄을 더한다.
 QString NormalizeEvidence(const QString& evidence)
 {
     QString strText = evidence;
@@ -263,10 +307,15 @@ QString NormalizeEvidence(const QString& evidence)
         return QString();
     if (vecLines.size() == 1)
         return vecLines.first().simplified();
-    const bool bFenceFirst = KnowledgeMarkdownLayout::IsFenceLine(vecLines.first());
-    if (!bFenceFirst)
+    const bool bBlockFirst = StartsWithBlock(vecLines);
+    if (!bBlockFirst)
         vecLines.first() = vecLines.first().simplified();
-    CloseOpenFence(&vecLines, bFenceFirst ? 0 : 1);
+    CloseOpenFence(&vecLines, bBlockFirst ? 0 : 1);
     return vecLines.join(QLatin1Char('\n'));
+}
+
+bool EvidenceStartsWithBlock(const QString& evidence)
+{
+    return StartsWithBlock(evidence.split(QLatin1Char('\n')));
 }
 }

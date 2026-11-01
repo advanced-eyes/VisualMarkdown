@@ -153,9 +153,12 @@ private slots:
             { DecodeUtf8("설명\n  ~~~\n  y\n"), DecodeUtf8("설명\n  ~~~\n  y\n  ~~~") },
             { DecodeUtf8("설명\n```\nx\n```"), DecodeUtf8("설명\n```\nx\n```") },
             { DecodeUtf8("설명\n```\n~~~\n```"), DecodeUtf8("설명\n```\n~~~\n```") },
-            // 첫 줄이 울타리면 첫 줄도 이어지는 줄처럼 다룬다(들여쓰기를 지키고 닫는지 본다)
+            // 첫 줄이 블록을 열면 첫 줄도 이어지는 줄처럼 다룬다(접지 않고 들여쓰기를 지키며, 울타리가 닫히는지 본다)
             { DecodeUtf8("```\nx  = 1\n```"), DecodeUtf8("```\nx  = 1\n```") },
             { DecodeUtf8("  ```\n  x"), DecodeUtf8("  ```\n  x\n  ```") },
+            { DecodeUtf8("  - 하나  둘  \n  - 셋"), DecodeUtf8("  - 하나  둘\n  - 셋") },
+            { DecodeUtf8("\n\n    코드  한 줄\n    둘째\n"), DecodeUtf8("    코드  한 줄\n    둘째") },
+            { DecodeUtf8("    코드 한 줄\n"), DecodeUtf8("코드 한 줄") },   // 한 줄이면 지금처럼 접는다
             // 첫 줄의 ``` 는 "근거: " 뒤라 울타리가 아니다(둘째 줄의 ``` 가 여는 줄이다)
             { DecodeUtf8("코드는 ``` 로 감싼다\n```\nx"), DecodeUtf8("코드는 ``` 로 감싼다\n```\nx\n```") },
         };
@@ -322,11 +325,11 @@ private slots:
                      "        들여 쓴 코드 블록\n          둘째 줄\n\n    끝 문단\n  - 절: 2\n")),
                  qUtf8Printable(strText));
 
-        // 첫 줄이 울타리면 `- 근거:` 뒤를 비우고 울타리부터 이어지는 줄로 쓴다(그래야 울타리가 블록을 연다)
+        // 첫 줄이 울타리면 `- 근거:` 뒤를 비우고 빈 줄 하나 다음에 울타리부터 쓴다(그래야 울타리가 블록을 연다)
         doc.vecCards[0].strEvidence = DecodeUtf8("```\nx  = 1\n```\n설명");
         const QString strFenceFirst = VerifyRoundTrip(doc, 2);
         QVERIFY2(!strFenceFirst.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
-        QVERIFY2(strFenceFirst.contains(DecodeUtf8("\n  - 근거:\n    ```\n    x  = 1\n    ```\n    설명\n  - 절: 2\n")),
+        QVERIFY2(strFenceFirst.contains(DecodeUtf8("\n  - 근거:\n\n    ```\n    x  = 1\n    ```\n    설명\n  - 절: 2\n")),
                  qUtf8Printable(strFenceFirst));
 
         // 닫히지 않은 울타리는 닫는 줄을 더해 쓴다. 뒤의 절이 코드 안으로 들어가지 않는다.
@@ -339,7 +342,90 @@ private slots:
         QCOMPARE(unclosed.document.vecTables.size(), 1);
     }
 
-    // 손으로 쓴 근거 안 울타리: 절 안에서 닫히면 닫는 줄까지는 빈 줄 · 들여쓰기와 상관없이 근거다(파일 훑기가 코드로 보는 범위와 같다).
+    // 여러 줄 근거의 첫 줄이 블록을 열면(목록 · 울타리 · $$ · 표 · 제목 · 인용 · 들여 쓴 코드 · 가로줄 · HTML) `  - 근거:` 뒤를 비우고
+    // 빈 줄 하나 다음에 첫 줄부터 공백 네 칸 들여 쓴다(Obsidian 이 표 · 목록 · 수식을 하위 항목 아래 블록으로 그린다). 왕복은 글자 그대로다.
+    void blockFirstEvidenceStartsAfterBlankLine()
+    {
+        const QStringList vecEvidences {
+            DecodeUtf8("- 하나\n- 둘\n  - 들여 쓴 셋"),
+            DecodeUtf8("* 별표 하나\n* 별표 둘"),
+            DecodeUtf8("+ 더하기 하나\n+ 더하기 둘"),
+            DecodeUtf8("1. 첫째\n2. 둘째"),
+            DecodeUtf8("1) 첫째\n2) 둘째"),
+            DecodeUtf8("```python\nx  = 1\n```\n설명"),
+            DecodeUtf8("~~~\ny\n~~~"),
+            DecodeUtf8("$$\nE = mc^2\n$$\n\n질량과 에너지"),
+            DecodeUtf8("$$E = mc^2$$\n질량과 에너지"),
+            DecodeUtf8("| 단계 | mAP (%) |\n| --- | --: |\n| 기준 | 63.4 |"),
+            DecodeUtf8("단계 | mAP\n--- | --:\n기준 | 63.4"),
+            DecodeUtf8("## 소제목\n본문"),
+            DecodeUtf8("#\n빈 제목 뒤"),
+            DecodeUtf8("> 인용\n> 둘째 줄"),
+            DecodeUtf8("    들여 쓴 코드\n    둘째  줄"),
+            DecodeUtf8("\t탭 코드\n둘째"),
+            DecodeUtf8("---\n가로줄 뒤 글"),
+            DecodeUtf8("<div>\n속 글\n</div>"),
+            DecodeUtf8("  - 두 칸 들인 목록\n  - 둘"),
+        };
+        for (const QString& strEvidence : vecEvidences)
+        {
+            QCOMPARE(KnowledgeText::NormalizeEvidence(strEvidence), strEvidence);
+            KnowledgeDocument doc = ReadCanonicalRecord();
+            doc.vecCards[0].strEvidence = strEvidence;
+            const QString strText = VerifyRoundTrip(doc, 2);
+            QVERIFY2(!strText.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
+            QString strBlock;
+            for (const QString& strLine : strEvidence.split(QLatin1Char('\n')))
+                strBlock += strLine.isEmpty() ? QStringLiteral("\n") : QStringLiteral("    ") + strLine + QLatin1Char('\n');
+            QVERIFY2(strText.contains(DecodeUtf8("<!-- card:7f3a2c1e -->\n  - 근거:\n\n") + strBlock + DecodeUtf8("  - 절: 2\n")),
+                     qUtf8Printable(strText));
+            QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strText).document.vecCards[0].strEvidence, strEvidence);
+        }
+
+        // 문단으로 시작하는 여러 줄 근거는 지금처럼 첫 줄을 `근거: ` 뒤에 쓴다(블록을 열지 않는 글)
+        const QStringList vecParagraphs {
+            DecodeUtf8("-5% 떨어졌다\n둘째"),
+            DecodeUtf8("1.5배 빠르다\n둘째"),
+            DecodeUtf8("#태그 로 시작\n둘째"),
+            DecodeUtf8("![그림](a.png) 설명\n둘째"),
+            DecodeUtf8("<모델> 은 입력을 받는다\n둘째"),
+            DecodeUtf8("$x$ 는 입력이다\n둘째"),
+            DecodeUtf8("a | b 는 표가 아니다\n둘째"),
+            DecodeUtf8("   세 칸 들인 문단\n둘째"),
+        };
+        for (const QString& strEvidence : vecParagraphs)
+        {
+            KnowledgeDocument doc = ReadCanonicalRecord();
+            doc.vecCards[0].strEvidence = strEvidence;
+            const QString strText = KnowledgeMarkdownWriter::WriteDocument(doc);
+            const QString strFirst = strEvidence.section(QLatin1Char('\n'), 0, 0).simplified();
+            QVERIFY2(strText.contains(DecodeUtf8("\n  - 근거: ") + strFirst + DecodeUtf8("\n    둘째\n  - 절: 2\n")), qUtf8Printable(strText));
+            QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strText).document.vecCards[0].strEvidence,
+                     strFirst + DecodeUtf8("\n둘째"));
+        }
+
+        // 한 줄 근거는 블록처럼 보여도 지금처럼 `근거: ` 뒤에 쓰고 1판이다
+        KnowledgeDocument single = ReadCanonicalRecord();
+        single.vecCards[0].strEvidence = DecodeUtf8("- 한 줄 목록");
+        const QString strSingle = VerifyRoundTrip(single, 1);
+        QVERIFY(strSingle.contains(DecodeUtf8("\n  - 근거: - 한 줄 목록\n  - 절: 2\n")));
+
+        // 손으로 쓴 글: `근거:` 값이 비고 빈 줄(여럿이어도) 뒤나 바로 다음 줄에 이어지는 줄이 오면 그 줄부터가 근거다
+        for (const QString& strGap : { QStringLiteral("\n"), QStringLiteral("\n\n"), QString() })
+        {
+            const QString strText = ReplaceCards(DecodeUtf8("- 카드 <!-- card:7f3a2c1e -->\n  - 근거:\n") + strGap
+                                                 + DecodeUtf8("    | a | b |\n    | --- | --- |\n    | 1 | 2 |\n  - 절: 2\n"));
+            const DocumentReadResult read = KnowledgeMarkdownReader::ReadDocument(strText);
+            QVERIFY(read.hashUnreadLines.isEmpty());
+            QCOMPARE(read.document.vecCards[0].strEvidence, DecodeUtf8("| a | b |\n| --- | --- |\n| 1 | 2 |"));
+            QCOMPARE(read.document.vecCards[0].strSection, QString("2"));
+            const QString strWritten = KnowledgeMarkdownWriter::WriteDocument(read.document, strText);
+            QVERIFY2(strWritten.contains(DecodeUtf8("  - 근거:\n\n    | a | b |\n    | --- | --- |\n    | 1 | 2 |\n  - 절: 2\n")),
+                     qUtf8Printable(strWritten));
+        }
+    }
+
+    // 손으로 쓴 근거 안 울타리:절 안에서 닫히면 닫는 줄까지는 빈 줄 · 들여쓰기와 상관없이 근거다(파일 훑기가 코드로 보는 범위와 같다).
     // 뗄 들여쓰기는 있는 만큼만 뗀다.
     void handWrittenFenceRunsToItsClose()
     {

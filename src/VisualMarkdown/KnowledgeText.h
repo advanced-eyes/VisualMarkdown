@@ -23,4 +23,7 @@ void CleanColumns(KnowledgeTable* table);
 
 // 카드 근거(여러 줄 마크다운)를 파일에 쓰고 다시 읽었을 때의 글로 만든다(format/DocumentFile.md §5.1).
 QString NormalizeEvidence(const QString& evidence);
+// 정리한 근거가 여러 줄이고 첫 줄이 블록(목록 · 울타리 · $$ · 표 · 제목 · 인용 · 들여 쓴 코드 …)을 여는가.
+// 그런 근거는 `  - 근거:` 뒤를 비우고 빈 줄 하나 다음에 첫 줄부터 쓴다(format/DocumentFile.md §5.1).
+bool EvidenceStartsWithBlock(const QString& evidence);
 }

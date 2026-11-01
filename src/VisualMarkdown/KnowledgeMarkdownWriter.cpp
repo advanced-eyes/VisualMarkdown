@@ -130,7 +130,8 @@ void AppendSubItem(QStringList* lines, const QString& key, const QString& value)
 }
 
 // 근거는 여러 줄 마크다운이다(format/DocumentFile.md §5.1). 첫 줄은 `  - 근거: ` 뒤에, 둘째 줄부터는 하위 항목의
-// 내용 들여쓰기(공백 네 칸)를 붙여 쓴다. 빈 줄은 공백 없이 쓴다. 첫 줄이 울타리면 `  - 근거:` 뒤를 비우고 첫 줄부터 이어 쓴다.
+// 내용 들여쓰기(공백 네 칸)를 붙여 쓴다. 빈 줄은 공백 없이 쓴다. 첫 줄이 블록을 열면 `  - 근거:` 뒤를 비우고
+// 빈 줄 하나 다음에 첫 줄부터 들여 쓴다(Obsidian 이 표 · 목록 · 수식을 `근거:` 문단에 붙이지 않고 블록으로 그린다).
 void AppendEvidence(QStringList* lines, const QString& evidence)
 {
     const QString strEvidence = KnowledgeText::NormalizeEvidence(evidence);
@@ -142,8 +143,8 @@ void AppendEvidence(QStringList* lines, const QString& evidence)
         AppendSubItem(lines, kKeyEvidence, strEvidence);
         return;
     }
-    if (KnowledgeMarkdownLayout::IsFenceLine(vecEvidence.first()))
-        *lines << QStringLiteral("  - ") + kKeyEvidence + QLatin1Char(':');
+    if (KnowledgeText::EvidenceStartsWithBlock(strEvidence))
+        *lines << QStringLiteral("  - ") + kKeyEvidence + QLatin1Char(':') << QString();
     else
         *lines << QStringLiteral("  - ") + kKeyEvidence + QStringLiteral(": ") + vecEvidence.takeFirst();
     for (const QString& strLine : vecEvidence)
