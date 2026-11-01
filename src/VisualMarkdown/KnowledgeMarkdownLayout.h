@@ -59,6 +59,11 @@ bool IsFenceLine(const QString& line);
 int FindFenceEnd(const QStringList& lines, int open, int end);
 // lines 끝까지 열린 채로 남는 울타리의 여는 줄 번호(FindFenceEnd 규칙). 없으면 -1.
 int FindOpenFence(const QStringList& lines);
+// 줄 앞 들여쓰기(공백 · 탭). 탭은 CommonMark 처럼 다음 4의 배수 칸까지 센다.
+// 칸 수를 돌려준다. characters 가 있으면 들여쓰기의 글자 수를 넣는다.
+int MeasureIndent(const QString& line, int* characters = nullptr);
+// 줄 앞 들여쓰기를 columns 칸까지(있는 만큼) 뗀다. 뗄 칸이 탭 가운데에 걸리면 남는 칸은 공백으로 둔다.
+QString RemoveIndent(const QString& line, int columns);
 // 한 줄 문단으로 쓸 글(한 줄 · 정의)이 블록(그림 · 인용 · 목록 · 표 · HTML · 울타리 · 제목 · 구분선)을 여는 줄로
 // 읽히지 않게 GFM 이스케이프 \ 하나를 넣는다(`\<` `\-` `\#` …, 번호 목록은 `1\.`). Scan 은 한 줄을 읽을 때 그 \ 하나를 뺀다.
 QString EscapeParagraphStart(const QString& text);

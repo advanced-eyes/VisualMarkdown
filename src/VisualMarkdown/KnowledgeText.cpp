@@ -15,8 +15,7 @@ constexpr int kCardIdDigits = 8;
 constexpr int kHexBase = 16;
 constexpr int kFirstDuplicateSuffix = 2;   // 겹치면 붙이는 첫 번호(id 는 "-2", 열 이름은 " 2")
 constexpr int kFenceMarkLength = 3;        // 닫는 울타리 ``` · ~~~
-constexpr int kTabStop = 4;                // 줄 앞 탭은 다음 4의 배수 칸까지(CommonMark)
-constexpr int kCodeIndent = 4;             // 이만큼 들인 줄은 들여 쓴 코드 블록이다(CommonMark)
+constexpr int kCodeIndent = 4;            // 이만큼 들인 줄은 들여 쓴 코드 블록이다(CommonMark)
 
 bool IsReservedName(const QString& slug)
 {
@@ -61,17 +60,6 @@ void CloseOpenFence(QStringList* lines, int first)
     *lines << GetLeadingWhitespace(strOpen) + QString(kFenceMarkLength, strOpen.trimmed().at(0));
 }
 
-// column 칸에 있는 들여쓰기 글자 ch 다음의 칸. 공백은 한 칸, 탭은 다음 4의 배수 칸까지다(CommonMark).
-// 공백 · 탭이 아니면 -1.
-int AdvanceIndent(int column, QChar ch)
-{
-    if (ch == QLatin1Char(' '))
-        return column + 1;
-    if (ch == QLatin1Char('\t'))
-        return column + kTabStop - column % kTabStop;
-    return -1;
-}
-
 // 줄이 블록을 여는가(CommonMark · GFM): 들여 쓴 코드(4칸 이상), 울타리, 목록 표지, 제목, 인용, $$ 수식, 표, 가로줄, HTML.
 // 표는 `|` 로 시작하거나, `|` 가 든 줄 다음 줄이 구분 줄(`--- | --:`)일 때다.
 bool OpensBlock(const QString& line, const QString& nextLine)
@@ -81,7 +69,7 @@ bool OpensBlock(const QString& line, const QString& nextLine)
     static const QRegularExpression reBreak(QStringLiteral(R"re(^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$)re"));
     static const QRegularExpression reDelimiterRow(QStringLiteral(R"re(^[ \t|:-]*-[ \t|:-]*$)re"));
     int iCharacters = 0;
-    if (KnowledgeText::MeasureIndent(line, &iCharacters) >= kCodeIndent)
+    if (KnowledgeMarkdownLayout::MeasureIndent(line, &iCharacters) >= kCodeIndent)
         return true;
     const QString strBody = line.mid(iCharacters);
     if (KnowledgeMarkdownLayout::IsFenceLine(strBody) || reMarker.match(strBody).hasMatch() || reBreak.match(strBody).hasMatch())
@@ -296,38 +284,5 @@ QString NormalizeEvidence(const QString& evidence)
 bool EvidenceStartsWithBlock(const QString& evidence)
 {
     return StartsWithBlock(evidence.split(QLatin1Char('\n')));
-}
-
-int MeasureIndent(const QString& line, int* characters)
-{
-    int iColumns = 0;
-    int iIndex = 0;
-    for (; iIndex < line.size(); ++iIndex)
-    {
-        const int iNextColumn = AdvanceIndent(iColumns, line[iIndex]);
-        if (iNextColumn < 0)
-            break;
-        iColumns = iNextColumn;
-    }
-    if (characters != nullptr)
-        *characters = iIndex;
-    return iColumns;
-}
-
-QString RemoveIndent(const QString& line, int columns)
-{
-    int iColumn = 0;
-    int iIndex = 0;
-    while (iIndex < line.size() && iColumn < columns)
-    {
-        const int iNextColumn = AdvanceIndent(iColumn, line[iIndex]);
-        if (iNextColumn < 0)
-            break;
-        ++iIndex;
-        if (iNextColumn > columns)
-            return QString(iNextColumn - columns, QLatin1Char(' ')) + line.mid(iIndex);
-        iColumn = iNextColumn;
-    }
-    return line.mid(iIndex);
 }
 }

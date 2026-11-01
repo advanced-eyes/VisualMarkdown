@@ -291,11 +291,11 @@ int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QS
         int iNext = iLine;
         while (iNext < lines.size() && lines[iNext].isEmpty())
             ++iNext;
-        if (iNext >= lines.size() || KnowledgeText::MeasureIndent(lines[iNext]) < contentIndent)
+        if (iNext >= lines.size() || KnowledgeMarkdownLayout::MeasureIndent(lines[iNext]) < contentIndent)
             break;
         for (; iLine < iNext; ++iLine)
             *evidence << QString();
-        *evidence << KnowledgeText::RemoveIndent(lines[iLine], contentIndent);
+        *evidence << KnowledgeMarkdownLayout::RemoveIndent(lines[iLine], contentIndent);
         ++iLine;
     }
     return iLine;
@@ -306,7 +306,7 @@ int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QS
 int ReadEvidence(const QStringList& lines, int line, const QString& value, QString* evidence)
 {
     QStringList vecEvidence { value };
-    const int iContentIndent = KnowledgeText::MeasureIndent(lines[line]) + kSubItemMarkerLength;
+    const int iContentIndent = KnowledgeMarkdownLayout::MeasureIndent(lines[line]) + kSubItemMarkerLength;
     const int iNextLine = ReadEvidenceLines(lines, line + 1, iContentIndent, &vecEvidence);
     *evidence = KnowledgeText::NormalizeEvidence(vecEvidence.join(QLatin1Char('\n')));
     return iNextLine - 1;

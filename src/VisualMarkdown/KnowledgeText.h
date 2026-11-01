@@ -26,10 +26,4 @@ QString NormalizeEvidence(const QString& evidence);
 // 정리한 근거가 여러 줄이고 첫 줄이 블록(목록 · 울타리 · $$ · 표 · 제목 · 인용 · 들여 쓴 코드 …)을 여는가.
 // 그런 근거는 `  - 근거:` 뒤를 비우고 빈 줄 하나 다음에 첫 줄부터 쓴다(format/DocumentFile.md §5.1).
 bool EvidenceStartsWithBlock(const QString& evidence);
-
-// 줄 앞 들여쓰기(공백 · 탭). 탭은 CommonMark 처럼 다음 4의 배수 칸까지 센다.
-// 칸 수를 돌려준다. characters 가 있으면 들여쓰기의 글자 수를 넣는다.
-int MeasureIndent(const QString& line, int* characters = nullptr);
-// 줄 앞 들여쓰기를 columns 칸까지(있는 만큼) 뗀다. 뗄 칸이 탭 가운데에 걸리면 남는 칸은 공백으로 둔다.
-QString RemoveIndent(const QString& line, int columns);
 }

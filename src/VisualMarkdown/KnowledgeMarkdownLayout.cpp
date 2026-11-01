@@ -1,7 +1,5 @@
 #include "VisualMarkdown/KnowledgeMarkdownLayout.h"
 
-#include "VisualMarkdown/KnowledgeText.h"
-
 #include <QRegularExpression>
 
 QString KnowledgeLayout::FindHeaderValue(const QString& key) const
@@ -33,6 +31,7 @@ constexpr int kTitlePrefixLength = 2;     // "# "
 constexpr int kSectionPrefixLength = 3;   // "## "
 constexpr int kQuoteMarkCount = 2;        // 앞뒤 따옴표
 constexpr int kBracketCount = 2;          // 흐름 목록의 [ ]
+constexpr int kTabStop = 4;               // 줄 앞 탭은 다음 4의 배수 칸까지(CommonMark)
 
 // YAML 따옴표 값: "…"(\" · \\ 를 되돌린다) · '…'('' 를 되돌린다). 앞뒤를 감싼 따옴표 한 쌍이 아니면 그대로 둔다.
 QString UnquoteScalar(const QString& value, EHeaderStyle* style)
@@ -167,6 +166,17 @@ void ReadHeaderValue(const QStringList& lines, const QString& value, KnowledgeHe
 bool IsBlankLine(const QString& line)
 {
     return line.trimmed().isEmpty();
+}
+
+// column 칸에 있는 들여쓰기 글자 ch 다음의 칸. 공백은 한 칸, 탭은 다음 4의 배수 칸까지다(CommonMark).
+// 공백 · 탭이 아니면 -1.
+int AdvanceIndent(int column, QChar ch)
+{
+    if (ch == QLatin1Char(' '))
+        return column + 1;
+    if (ch == QLatin1Char('\t'))
+        return column + kTabStop - column % kTabStop;
+    return -1;
 }
 
 QString TrimLeft(const QString& line)
@@ -318,11 +328,11 @@ bool IsFenceLine(const QString& line)
 int FindFenceEnd(const QStringList& lines, int open, int end)
 {
     const QChar chFence = lines[open].trimmed().at(0);
-    const int iFenceIndent = KnowledgeText::MeasureIndent(lines[open]);
+    const int iFenceIndent = MeasureIndent(lines[open]);
     for (int iLine = open + 1; iLine < end; ++iLine)
     {
         const QString& strLine = lines[iLine];
-        if (iFenceIndent > 0 && !IsBlankLine(strLine) && KnowledgeText::MeasureIndent(strLine) < iFenceIndent)
+        if (iFenceIndent > 0 && !IsBlankLine(strLine) && MeasureIndent(strLine) < iFenceIndent)
             return iLine - 1;
         if (IsFenceLine(strLine) && strLine.trimmed().at(0) == chFence)
             return iLine;
@@ -346,6 +356,39 @@ int FindOpenFence(const QStringList& lines)
         iLine = iLast + 1;
     }
     return -1;
+}
+
+int MeasureIndent(const QString& line, int* characters)
+{
+    int iColumns = 0;
+    int iIndex = 0;
+    for (; iIndex < line.size(); ++iIndex)
+    {
+        const int iNextColumn = AdvanceIndent(iColumns, line[iIndex]);
+        if (iNextColumn < 0)
+            break;
+        iColumns = iNextColumn;
+    }
+    if (characters != nullptr)
+        *characters = iIndex;
+    return iColumns;
+}
+
+QString RemoveIndent(const QString& line, int columns)
+{
+    int iColumn = 0;
+    int iIndex = 0;
+    while (iIndex < line.size() && iColumn < columns)
+    {
+        const int iNextColumn = AdvanceIndent(iColumn, line[iIndex]);
+        if (iNextColumn < 0)
+            break;
+        ++iIndex;
+        if (iNextColumn > columns)
+            return QString(iNextColumn - columns, QLatin1Char(' ')) + line.mid(iIndex);
+        iColumn = iNextColumn;
+    }
+    return line.mid(iIndex);
 }
 
 QString EscapeParagraphStart(const QString& text)
@@ -399,9 +442,10 @@ KnowledgeLayout Scan(const QString& text)
         {
             // 울타리 블록(여는 줄부터 끝 줄까지)은 제목 · 절로 보지 않는다. 비지 않은 줄은 절 범위에 든다.
             const int iFenceEnd = SkipFence(vecLines, iLine, iCount);
-            for (int iFence = iLine; iFence < iFenceEnd; ++iFence)
-                if (!layout.vecSections.isEmpty() && !IsBlankLine(vecLines[iFence]))
-                    layout.vecSections.last().iLastLine = iFence;
+            if (!layout.vecSections.isEmpty())
+                for (int iFence = iLine; iFence < iFenceEnd; ++iFence)
+                    if (!IsBlankLine(vecLines[iFence]))
+                        layout.vecSections.last().iLastLine = iFence;
             iLine = iFenceEnd - 1;
             continue;
         }
