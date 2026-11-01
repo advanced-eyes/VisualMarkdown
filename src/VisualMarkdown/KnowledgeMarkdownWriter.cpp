@@ -15,6 +15,9 @@ namespace
 {
 using UnreadLines = QHash<QString, QStringList>;
 
+constexpr int kFirstFormat = 1;               // 형식 판은 1부터다
+constexpr int kMultilineEvidenceFormat = 2;   // 여러 줄 근거가 들어온 판
+
 const QString kSectionOutline = QStringLiteral("차례");
 const QString kSectionKeyNumbers = QStringLiteral("핵심 숫자");
 const QString kSectionCards = QStringLiteral("지식");
@@ -31,9 +34,6 @@ const QString kKeyStatus = QStringLiteral("상태");
 
 const QString kDocumentConceptPath = QStringLiteral("../concepts/");
 const QString kEvidenceIndent = QStringLiteral("    ");   // 근거의 이어지는 줄: 하위 항목 "  - " 의 내용 들여쓰기
-
-constexpr int kFirstFormat = 1;               // 형식 판은 1부터다
-constexpr int kMultilineEvidenceFormat = 2;   // 여러 줄 근거가 들어온 판
 
 struct HeaderField
 {
@@ -149,27 +149,6 @@ void AppendEvidence(QStringList* lines, const QString& evidence)
         *lines << QStringLiteral("  - ") + kKeyEvidence + QStringLiteral(": ") + vecEvidence.takeFirst();
     for (const QString& strLine : vecEvidence)
         *lines << (strLine.isEmpty() ? QString() : kEvidenceIndent + strLine);
-}
-
-bool HasMultilineEvidence(const KnowledgeDocument& document)
-{
-    for (const KnowledgeCard& card : document.vecCards)
-        if (KnowledgeText::NormalizeEvidence(card.strEvidence).contains(QLatin1Char('\n')))
-            return true;
-    return false;
-}
-
-// 쓰는 판: 기록을 나타낼 수 있는 가장 낮은 판(needed). 기록의 판이 아는 판보다 높으면(더 새 파일에서 읽은 기록)
-// 그 판을 지킨다. 그래서 새 문법을 쓰지 않은 파일은 옛 판으로 남아 옛 앱이 계속 고칠 수 있다(format/Vocabulary.md §5).
-int ChooseFormat(int recordFormat, int neededFormat)
-{
-    const int iKnownFormat = KnowledgeVocabulary::Get().GetFormat();
-    return recordFormat > iKnownFormat ? std::max(recordFormat, neededFormat) : neededFormat;
-}
-
-int ChooseDocumentFormat(const KnowledgeDocument& document)
-{
-    return ChooseFormat(document.iFormat, HasMultilineEvidence(document) ? kMultilineEvidenceFormat : kFirstFormat);
 }
 
 // 모르는 하위 항목은 읽은 글자 그대로 쓴다. 줄바꿈만 공백 하나로 바꾼다.
@@ -470,6 +449,27 @@ QStringList MakeHeaderLines(const HeaderField& field, EHeaderStyle style, const 
     }
     const bool bQuoted = style == EHeaderStyle::DOUBLE_QUOTED || style == EHeaderStyle::SINGLE_QUOTED;
     return { MakeHeaderLine(field.strKey, MakeScalar(field.strValue, bQuoted ? style : EHeaderStyle::PLAIN)) };
+}
+
+bool HasMultilineEvidence(const KnowledgeDocument& document)
+{
+    for (const KnowledgeCard& card : document.vecCards)
+        if (KnowledgeText::NormalizeEvidence(card.strEvidence).contains(QLatin1Char('\n')))
+            return true;
+    return false;
+}
+
+// 쓰는 판: 기록을 나타낼 수 있는 가장 낮은 판(needed). 기록의 판이 아는 판보다 높으면(더 새 파일에서 읽은 기록)
+// 그 판을 지킨다. 그래서 새 문법을 쓰지 않은 파일은 옛 판으로 남아 옛 앱이 계속 고칠 수 있다(format/Vocabulary.md §5).
+int ChooseFormat(int recordFormat, int neededFormat)
+{
+    const int iKnownFormat = KnowledgeVocabulary::Get().GetFormat();
+    return recordFormat > iKnownFormat ? std::max(recordFormat, neededFormat) : neededFormat;
+}
+
+int ChooseDocumentFormat(const KnowledgeDocument& document)
+{
+    return ChooseFormat(document.iFormat, HasMultilineEvidence(document) ? kMultilineEvidenceFormat : kFirstFormat);
 }
 
 QVector<HeaderField> MakeDocumentHeader(const KnowledgeDocument& document, const QString& digest)

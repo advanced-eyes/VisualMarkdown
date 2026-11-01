@@ -1,4 +1,3 @@
-#include "VisualMarkdown/KnowledgeMarkdownLayout.h"
 #include "VisualMarkdown/KnowledgeMarkdownReader.h"
 #include "VisualMarkdown/KnowledgeMarkdownWriter.h"
 #include "VisualMarkdown/KnowledgeText.h"
@@ -11,13 +10,45 @@
 
 namespace
 {
-QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
+constexpr int kSingleLineFormat = 1;   // 여러 줄 근거가 없는 문서의 판
+constexpr int kMultilineFormat = 2;    // 여러 줄 근거가 있는 문서의 판
 
-const char* const kCanonicalCard =
+// 정준 글(KnowledgeTestData::CanonicalDocument)의 카드
+constexpr const char* kCanonicalCard =
     "- 작은 개선을 쌓아 속도를 잃지 않고 정확도를 올렸다 <!-- card:7f3a2c1e -->\n"
     "  - 근거: VOC 2007 mAP 63.4% → 76.8%, 67 fps\n"
     "  - 절: 2\n"
     "  - 개념: [YOLOv2](../concepts/yolov2.md)\n";
+
+// 문단 둘 · 목록(들여 쓴 목록 포함) · $$ 수식이 든 근거와, 그것을 쓴 하위 항목 줄
+constexpr const char* kRichEvidence =
+    "VOC 2007 mAP 63.4% → 76.8%, 67 fps\n"
+    "배치 정규화만으로 2%p 넘게 오른다.\n"
+    "\n"
+    "둘째 문단은 빈 줄 뒤에 온다.\n"
+    "\n"
+    "- 목록 하나\n"
+    "- 목록 둘\n"
+    "  - 들여 쓴 목록\n"
+    "\n"
+    "$$\n"
+    "\\mathrm{mAP} = \\frac{1}{N} \\sum_{i=1}^{N} \\mathrm{AP}_i\n"
+    "$$";
+constexpr const char* kRichEvidenceLines =
+    "  - 근거: VOC 2007 mAP 63.4% → 76.8%, 67 fps\n"
+    "    배치 정규화만으로 2%p 넘게 오른다.\n"
+    "\n"
+    "    둘째 문단은 빈 줄 뒤에 온다.\n"
+    "\n"
+    "    - 목록 하나\n"
+    "    - 목록 둘\n"
+    "      - 들여 쓴 목록\n"
+    "\n"
+    "    $$\n"
+    "    \\mathrm{mAP} = \\frac{1}{N} \\sum_{i=1}^{N} \\mathrm{AP}_i\n"
+    "    $$\n";
+
+QString DecodeUtf8(const char* text) { return QString::fromUtf8(text); }
 
 KnowledgeDocument ReadCanonicalRecord()
 {
@@ -34,37 +65,6 @@ QString ReplaceCards(const QString& cards)
     strText.replace(strCard, cards);
     return strText;
 }
-
-// 문단 둘 · 목록(들여 쓴 목록 포함) · $$ 수식이 든 근거
-QString MakeRichEvidence()
-{
-    return DecodeUtf8("VOC 2007 mAP 63.4% → 76.8%, 67 fps\n"
-                      "배치 정규화만으로 2%p 넘게 오른다.\n"
-                      "\n"
-                      "둘째 문단은 빈 줄 뒤에 온다.\n"
-                      "\n"
-                      "- 목록 하나\n"
-                      "- 목록 둘\n"
-                      "  - 들여 쓴 목록\n"
-                      "\n"
-                      "$$\n"
-                      "\\mathrm{mAP} = \\frac{1}{N} \\sum_{i=1}^{N} \\mathrm{AP}_i\n"
-                      "$$");
-}
-
-const char* const kRichEvidenceLines =
-    "  - 근거: VOC 2007 mAP 63.4% → 76.8%, 67 fps\n"
-    "    배치 정규화만으로 2%p 넘게 오른다.\n"
-    "\n"
-    "    둘째 문단은 빈 줄 뒤에 온다.\n"
-    "\n"
-    "    - 목록 하나\n"
-    "    - 목록 둘\n"
-    "      - 들여 쓴 목록\n"
-    "\n"
-    "    $$\n"
-    "    \\mathrm{mAP} = \\frac{1}{N} \\sum_{i=1}^{N} \\mathrm{AP}_i\n"
-    "    $$\n";
 
 // 쓰고 다시 읽으면 기록이 그대로(digest · 판은 쓴 값)이고, 다시 써도 바이트가 같은지 본다. 쓴 글을 돌려준다.
 QString VerifyRoundTrip(const KnowledgeDocument& document, int expectedFormat)
@@ -100,17 +100,17 @@ private slots:
     void multilineEvidenceIsWrittenIndented()
     {
         KnowledgeDocument doc = ReadCanonicalRecord();
-        doc.vecCards[0].strEvidence = MakeRichEvidence();
+        doc.vecCards[0].strEvidence = DecodeUtf8(kRichEvidence);
         doc.vecCards[0].vecExtraLines = QStringList({ DecodeUtf8("메모: 다시 볼 것") });
 
-        const QString strText = VerifyRoundTrip(doc, 2);
+        const QString strText = VerifyRoundTrip(doc, kMultilineFormat);
         QVERIFY2(!strText.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
         const QString strCard = DecodeUtf8("- 작은 개선을 쌓아 속도를 잃지 않고 정확도를 올렸다 <!-- card:7f3a2c1e -->\n")
             + DecodeUtf8(kRichEvidenceLines)
             + DecodeUtf8("  - 절: 2\n  - 개념: [YOLOv2](../concepts/yolov2.md)\n  - 메모: 다시 볼 것\n\n## 관계\n");
         QVERIFY2(strText.contains(strCard), qUtf8Printable(strText));
         QVERIFY2(strText.contains(QStringLiteral("\nformat: 2\n")), qUtf8Printable(strText));
-        QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strText).document.vecCards[0].strEvidence, MakeRichEvidence());
+        QCOMPARE(KnowledgeMarkdownReader::ReadDocument(strText).document.vecCards[0].strEvidence, DecodeUtf8(kRichEvidence));
 
         // 줄 끝 공백 · 공백만 있는 줄이 없다
         for (const QString& strLine : strText.split(QLatin1Char('\n')))
@@ -129,7 +129,7 @@ private slots:
         doc.vecCards[0].strEvidence = DecodeUtf8("  앞뒤   공백과\t탭  \n\n");
         KnowledgeDocument expected = doc;
         expected.vecCards[0].strEvidence = DecodeUtf8("앞뒤 공백과 탭");
-        const QString strText = VerifyRoundTrip(expected, 1);
+        const QString strText = VerifyRoundTrip(expected, kSingleLineFormat);
         QVERIFY(!strText.isEmpty());
         QCOMPARE(KnowledgeMarkdownWriter::WriteDocument(doc), strText);
         QVERIFY(strText.contains(DecodeUtf8("\n  - 근거: 앞뒤 공백과 탭\n  - 절: 2\n")));
@@ -293,12 +293,12 @@ private slots:
 
         // 탭으로 들인 정준 글(모든 하위 항목 · 이어지는 줄 앞 두 칸을 탭으로)은 공백 글과 같은 기록이다
         KnowledgeDocument doc = ReadCanonicalRecord();
-        doc.vecCards[0].strEvidence = MakeRichEvidence();
+        doc.vecCards[0].strEvidence = DecodeUtf8(kRichEvidence);
         QString strTabs = KnowledgeMarkdownWriter::WriteDocument(doc);
         strTabs.replace(QStringLiteral("\n  "), QStringLiteral("\n\t"));
         const DocumentReadResult tabs = KnowledgeMarkdownReader::ReadDocument(strTabs);
         QVERIFY(tabs.hashUnreadLines.isEmpty());
-        QCOMPARE(tabs.document.vecCards[0].strEvidence, MakeRichEvidence());
+        QCOMPARE(tabs.document.vecCards[0].strEvidence, DecodeUtf8(kRichEvidence));
     }
 
     // 코드 블록: 들여 쓴 코드 블록 · 울타리 코드 블록(빈 줄 · 더 들인 줄 · 안쪽 공백)이 쓰고 읽으면 글자 그대로다
@@ -318,7 +318,7 @@ private slots:
             "끝 문단");
         KnowledgeDocument doc = ReadCanonicalRecord();
         doc.vecCards[0].strEvidence = strEvidence;
-        const QString strText = VerifyRoundTrip(doc, 2);
+        const QString strText = VerifyRoundTrip(doc, kMultilineFormat);
         QVERIFY2(!strText.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
         QVERIFY2(strText.contains(DecodeUtf8(
                      "  - 근거: 설명 문단\n    ```python\n    def f(x):\n\n        return x  # 두 칸\n    ```\n\n"
@@ -327,7 +327,7 @@ private slots:
 
         // 첫 줄이 울타리면 `- 근거:` 뒤를 비우고 빈 줄 하나 다음에 울타리부터 쓴다(그래야 울타리가 블록을 연다)
         doc.vecCards[0].strEvidence = DecodeUtf8("```\nx  = 1\n```\n설명");
-        const QString strFenceFirst = VerifyRoundTrip(doc, 2);
+        const QString strFenceFirst = VerifyRoundTrip(doc, kMultilineFormat);
         QVERIFY2(!strFenceFirst.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
         QVERIFY2(strFenceFirst.contains(DecodeUtf8("\n  - 근거:\n\n    ```\n    x  = 1\n    ```\n    설명\n  - 절: 2\n")),
                  qUtf8Printable(strFenceFirst));
@@ -372,7 +372,7 @@ private slots:
             QCOMPARE(KnowledgeText::NormalizeEvidence(strEvidence), strEvidence);
             KnowledgeDocument doc = ReadCanonicalRecord();
             doc.vecCards[0].strEvidence = strEvidence;
-            const QString strText = VerifyRoundTrip(doc, 2);
+            const QString strText = VerifyRoundTrip(doc, kMultilineFormat);
             QVERIFY2(!strText.isEmpty(), qUtf8Printable(KnowledgeMarkdownWriter::WriteDocument(doc)));
             QString strBlock;
             for (const QString& strLine : strEvidence.split(QLatin1Char('\n')))
@@ -407,7 +407,7 @@ private slots:
         // 한 줄 근거는 블록처럼 보여도 지금처럼 `근거: ` 뒤에 쓰고 1판이다
         KnowledgeDocument single = ReadCanonicalRecord();
         single.vecCards[0].strEvidence = DecodeUtf8("- 한 줄 목록");
-        const QString strSingle = VerifyRoundTrip(single, 1);
+        const QString strSingle = VerifyRoundTrip(single, kSingleLineFormat);
         QVERIFY(strSingle.contains(DecodeUtf8("\n  - 근거: - 한 줄 목록\n  - 절: 2\n")));
 
         // 손으로 쓴 글: `근거:` 값이 비고 빈 줄(여럿이어도) 뒤나 바로 다음 줄에 이어지는 줄이 오면 그 줄부터가 근거다
@@ -425,7 +425,7 @@ private slots:
         }
     }
 
-    // 손으로 쓴 근거 안 울타리:절 안에서 닫히면 닫는 줄까지는 빈 줄 · 들여쓰기와 상관없이 근거다(파일 훑기가 코드로 보는 범위와 같다).
+    // 손으로 쓴 근거 안 울타리: 절 안에서 닫히면 닫는 줄까지는 빈 줄 · 들여쓰기와 상관없이 근거다(파일 훑기가 코드로 보는 범위와 같다).
     // 뗄 들여쓰기는 있는 만큼만 뗀다.
     void handWrittenFenceRunsToItsClose()
     {
@@ -548,7 +548,7 @@ private slots:
 
         // 여러 줄 근거를 지우면 2판 파일도 1판으로 다시 쓴다(옛 Ocean 이 다시 고칠 수 있다)
         KnowledgeDocument multi = ReadCanonicalRecord();
-        multi.vecCards[0].strEvidence = MakeRichEvidence();
+        multi.vecCards[0].strEvidence = DecodeUtf8(kRichEvidence);
         const QString strMulti = KnowledgeMarkdownWriter::WriteDocument(multi);
         KnowledgeDocument reread = KnowledgeMarkdownReader::ReadDocument(strMulti).document;
         QCOMPARE(reread.iFormat, 2);
