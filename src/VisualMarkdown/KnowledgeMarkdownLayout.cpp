@@ -2,6 +2,8 @@
 
 #include <QRegularExpression>
 
+#include <algorithm>
+
 QString KnowledgeLayout::FindHeaderValue(const QString& key) const
 {
     const KnowledgeHeaderLine* pHeader = FindHeader(key);
@@ -32,6 +34,8 @@ constexpr int kSectionPrefixLength = 3;   // "## "
 constexpr int kQuoteMarkCount = 2;        // 앞뒤 따옴표
 constexpr int kBracketCount = 2;          // 흐름 목록의 [ ]
 constexpr int kTabStop = 4;               // 줄 앞 탭은 다음 4의 배수 칸까지(CommonMark)
+constexpr int kCodeIndent = 4;            // 담는 곳보다 이만큼 들인 줄은 들여 쓴 코드다. ``` 줄이어도 울타리가 아니다(CommonMark)
+constexpr int kMaxListMarkerSpaces = 4;   // 목록 표지 뒤 공백이 이보다 많으면 내용은 표지 뒤 한 칸부터다(CommonMark)
 
 // YAML 따옴표 값: "…"(\" · \\ 를 되돌린다) · '…'('' 를 되돌린다). 앞뒤를 감싼 따옴표 한 쌍이 아니면 그대로 둔다.
 QString UnquoteScalar(const QString& value, EHeaderStyle* style)
@@ -177,6 +181,31 @@ int AdvanceIndent(int column, QChar ch)
     if (ch == QLatin1Char('\t'))
         return column + kTabStop - column % kTabStop;
     return -1;
+}
+
+// 목록 표지 줄(`-` · `*` · `+` · `1.` · `1)` 뒤에 공백이나 줄 끝)이면 그 항목의 내용 들여쓰기(CommonMark), 아니면 -1.
+// 내용 칸 = 표지 끝 칸 + 뒤 공백 칸. 뒤가 비었거나 공백이 4칸을 넘으면(들여 쓴 코드로 시작) 표지 끝 칸 + 1.
+int MeasureListContentIndent(const QString& line)
+{
+    static const QRegularExpression reMarker(QStringLiteral(R"re(^(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))re"));
+    int iIndex = 0;
+    const int iIndent = KnowledgeMarkdownLayout::MeasureIndent(line, &iIndex);
+    const QRegularExpressionMatch match = reMarker.match(line.mid(iIndex));
+    if (!match.hasMatch())
+        return -1;
+    const int iMarkerEnd = iIndent + match.capturedLength();
+    iIndex += match.capturedLength();
+    int iColumn = iMarkerEnd;
+    for (; iIndex < line.size(); ++iIndex)
+    {
+        const int iNextColumn = AdvanceIndent(iColumn, line[iIndex]);
+        if (iNextColumn < 0)
+            break;
+        iColumn = iNextColumn;
+    }
+    if (iIndex >= line.size() || iColumn - iMarkerEnd > kMaxListMarkerSpaces)
+        return iMarkerEnd + 1;
+    return iColumn;
 }
 
 QString TrimLeft(const QString& line)
@@ -325,15 +354,36 @@ bool IsFenceLine(const QString& line)
     return strTrimmed.startsWith(QStringLiteral("```")) || strTrimmed.startsWith(QStringLiteral("~~~"));
 }
 
+int FindFenceContainer(const QStringList& lines, int open)
+{
+    const int iFenceIndent = MeasureIndent(lines[open]);
+    int iBound = iFenceIndent;
+    for (int iLine = open - 1; iLine >= 0 && iBound > 0; --iLine)
+    {
+        if (IsBlankLine(lines[iLine]))
+            continue;
+        const int iIndent = MeasureIndent(lines[iLine]);
+        if (iIndent >= iBound)
+            continue;
+        const int iContent = MeasureListContentIndent(lines[iLine]);
+        if (iContent >= 0 && iContent <= iFenceIndent)
+            return iContent;
+        iBound = iIndent;
+    }
+    return -1;
+}
+
 int FindFenceEnd(const QStringList& lines, int open, int end)
 {
+    const int iContainer = FindFenceContainer(lines, open);
+    if (MeasureIndent(lines[open]) - std::max(iContainer, 0) >= kCodeIndent)
+        return open;   // 들여 쓴 코드 · 문단 글이지 울타리가 아니다
     const QChar chFence = lines[open].trimmed().at(0);
-    const int iFenceIndent = MeasureIndent(lines[open]);
     for (int iLine = open + 1; iLine < end; ++iLine)
     {
         const QString& strLine = lines[iLine];
-        if (iFenceIndent > 0 && !IsBlankLine(strLine) && MeasureIndent(strLine) < iFenceIndent)
-            return iLine - 1;
+        if (iContainer >= 0 && !IsBlankLine(strLine) && MeasureIndent(strLine) < iContainer)
+            return iLine - 1;   // 담는 목록 항목이 끝났다
         if (IsFenceLine(strLine) && strLine.trimmed().at(0) == chFence)
             return iLine;
     }

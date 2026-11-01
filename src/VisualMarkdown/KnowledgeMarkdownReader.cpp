@@ -281,8 +281,9 @@ bool IsHeadLine(const QString& line)
 
 // `- 근거:` 줄 다음(first)부터 근거의 이어지는 줄을 evidence 에 더하고, 더하지 않은 첫 줄 번호를 돌려준다.
 // 이어지는 줄 = contentIndent 칸 이상 들인 줄(그만큼 떼고 남은 들여쓰기는 지킨다). 빈 줄은 다음 비지 않은 줄이
-// 이어지는 줄일 때만 넣는다. 울타리 안이어도 같다: 근거 안 울타리는 contentIndent 칸 이상 들여 써져 있어서, 파일 훑기
-// (KnowledgeMarkdownLayout::FindFenceEnd)도 그보다 덜 들인 줄 앞에서 울타리를 닫는다. 그래서 근거와 코드 범위가 엇갈리지 않는다.
+// 이어지는 줄일 때만 넣는다. 울타리 안이어도 같다: 근거 안 울타리를 담는 곳은 `- 근거:` 항목(내용 칸 contentIndent)이나
+// 근거 안 목록 항목이라, 파일 훑기(KnowledgeMarkdownLayout::FindFenceEnd)도 contentIndent 보다 덜 들인 줄 앞에서는 울타리를
+// 닫는다. 그래서 근거와 코드 범위가 엇갈리지 않는다.
 int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QStringList* evidence)
 {
     int iLine = first;

@@ -53,9 +53,14 @@ namespace KnowledgeMarkdownLayout
 QString Normalize(const QString& text);
 KnowledgeLayout Scan(const QString& text);
 bool IsFenceLine(const QString& line);
-// lines[open](울타리 줄)이 여는 울타리 블록의 끝 줄. 같은 글자로 시작하는 울타리 줄이 닫는다. 들여 쓴 울타리
-// (여는 줄 들여쓰기 k ≥ 1)는 k 보다 덜 들인 비지 않은 줄이 먼저 나오면 그 줄 앞에서 저절로 닫힌다(CommonMark:
-// 목록 항목이 끝나면 그 안 코드도 닫힌다). end 앞까지 닫히지 않으면 -1. Scan 이 제목 · 절을 찾을 때 이 규칙을 쓴다.
+// lines[open](울타리 줄)을 담는 목록 항목의 내용 들여쓰기. 없으면(맨 바깥 울타리) -1.
+// 앞 줄을 거슬러 올라가며, 지금 기준(처음엔 울타리 들여쓰기 k)보다 덜 들인 비지 않은 줄이 내용 들여쓰기 c ≤ k 인
+// 목록 표지 줄이면 그 c 다. 아니면 기준을 그 줄 들여쓰기로 낮추고 계속 올라간다. 기준이 0 이 되면 맨 바깥이다.
+int FindFenceContainer(const QStringList& lines, int open);
+// lines[open](울타리 줄)이 여는 울타리 블록의 끝 줄. 같은 글자로 시작하는 울타리 줄이 닫는다. 목록 항목 안 울타리는
+// 그 항목의 내용 들여쓰기보다 덜 들인 비지 않은 줄(항목이 끝난다) 앞에서도 닫힌다(CommonMark). 담는 곳(맨 바깥은 0)보다
+// 4칸 이상 들인 줄은 울타리가 아니다(들여 쓴 코드 · 문단 글): open 을 돌려준다. end 앞까지 닫히지 않으면 -1.
+// Scan 이 제목 · 절 · 한 줄을 찾을 때 이 규칙을 쓴다.
 int FindFenceEnd(const QStringList& lines, int open, int end);
 // lines 끝까지 열린 채로 남는 울타리의 여는 줄 번호(FindFenceEnd 규칙). 없으면 -1.
 int FindOpenFence(const QStringList& lines);

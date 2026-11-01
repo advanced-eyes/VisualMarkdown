@@ -598,9 +598,9 @@ void ApplyEdits(QStringList* lines, QVector<LineEdit> edits)
     }
 }
 
-// 읽지 못한 줄을 절 끝에 붙인다. 붙인 뒤 맨 바깥 울타리(들여쓰기 0)가 열린 채 절이 끝나면 그 절 끝에 닫는 줄을 더한다.
-// 써 낸 파일에서 정해진 절이 뒤 절을 코드로 삼키지 않게 하려는 것이다. 들여 쓴 울타리는 다음 절 제목(들여쓰기 0)
-// 앞에서 저절로 닫히므로 닫는 줄을 더하지 않는다(KnowledgeMarkdownLayout::FindFenceEnd).
+// 읽지 못한 줄을 절 끝에 붙인다. 붙인 뒤 맨 바깥 울타리(담는 목록 항목이 없는 울타리)가 열린 채 절이 끝나면 그 절 끝에
+// 닫는 줄을 더한다. 써 낸 파일에서 정해진 절이 뒤 절을 코드로 삼키지 않게 하려는 것이다. 목록 항목 안 울타리는 다음 절
+// 제목(들여쓰기 0) 앞에서 그 항목과 함께 닫히므로 닫는 줄을 더하지 않는다(KnowledgeMarkdownLayout::FindFenceEnd).
 QStringList AppendUnread(const QString& name, const QStringList& section, const QStringList& unread)
 {
     if (unread.isEmpty())
@@ -609,7 +609,7 @@ QStringList AppendUnread(const QString& name, const QStringList& section, const 
     vecLines << QString();
     vecLines += unread;
     const int iOpen = KnowledgeMarkdownLayout::FindOpenFence(vecLines);
-    if (iOpen >= 0 && KnowledgeMarkdownLayout::MeasureIndent(vecLines[iOpen]) == 0)
+    if (iOpen >= 0 && KnowledgeMarkdownLayout::FindFenceContainer(vecLines, iOpen) < 0)
         vecLines << QString(kFenceMarkLength, vecLines[iOpen].trimmed().at(0));
     return vecLines;
 }
