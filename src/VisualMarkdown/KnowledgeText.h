@@ -20,4 +20,7 @@ EColumnKind ClassifyColumn(const KnowledgeTable& table, int column);
 QString CleanName(const QString& name);
 QStringList CleanNames(const QStringList& names);
 void CleanColumns(KnowledgeTable* table);
+
+// 카드 근거(여러 줄 마크다운)를 파일에 쓰고 다시 읽었을 때의 글로 만든다(format/DocumentFile.md §5.1).
+QString NormalizeEvidence(const QString& evidence);
 }

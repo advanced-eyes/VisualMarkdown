@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | `you-only-look-once-unified-real-time-object-detection.md` | YOLO 논문(CVPR 2016) | 계열로 색을 나누는 산점도, 카드의 모르는 하위 항목(`메모:`), 개념 파일과 합쳐지는 선 |
 | `yolo9000-better-faster-stronger.md` | YOLO9000 논문(CVPR 2017) | 단계 막대(줄어드는 단계 포함), 단위가 다른 두 y 의 선, 막대, 단위 없는 핵심 숫자 |
-| `yolov3-an-incremental-improvement.md` | YOLOv3 기술 보고서(2018) | 단위가 같은 두 y 의 선, 수치 x 산점도, y 여섯의 히트맵(y 열마다 색 눈금), 확인됨과 AI 제안이 합쳐지는 선, 없는 개념을 가리키는 선, 뒤집어 적은 방향 없는 선 |
+| `yolov3-an-incremental-improvement.md` | YOLOv3 기술 보고서(2018) | 단위가 같은 두 y 의 선, 수치 x 산점도, y 여섯의 히트맵(y 열마다 색 눈금), 확인됨과 AI 제안이 합쳐지는 선, 없는 개념을 가리키는 선, 뒤집어 적은 방향 없는 선, 여러 줄 근거(셋째 카드: 문단 둘 · `$$` 수식 · 목록. 그래서 이 문서만 `format: 2`) |
 | `2단계-검출기의-흐름.md` | 손으로 정리한 노트 | `rules: 0` · `edited: true` · `analysis` 없음, 핵심 숫자 절 없음, id 없는 카드, 개념 이름과 다른 링크 글자, 빈 칸 · 단위가 다른 두 y 의 막대 |
 | `focal-loss-for-dense-object-detection.md` | RetinaNet 논문(ICCV 2017) | 데이터 절 없는 문서, `idea` 종류 개념, AI 제안인 종류 선 |
 | `결제-서비스-개편-기획서.md` | 가상의 기획서 | `system` · `component` 개념, `uses` 위주의 관계, 글자 순서 x 의 선(빈 칸), 합이 100 % 인 비중의 도넛, 칸 속 `\|` · 조건 속 `"`, 천 단위 쉼표, 그릴 수 없는 표 |
@@ -83,7 +83,8 @@
 
 보기와 읽기에서 함께 확인할 것이다.
 
-- 카드: id 없는 카드(2단계 노트의 둘째 카드), 모르는 하위 항목 `메모:`(YOLO 의 둘째 카드), 개념 이름과 다른 링크 글자(`Region Proposal Network` → 개념 RPN)
+- 카드: id 없는 카드(2단계 노트의 둘째 카드), 모르는 하위 항목 `메모:`(YOLO 의 둘째 카드), 개념 이름과 다른 링크 글자(`Region Proposal Network` → 개념 RPN), 여러 줄 근거(YOLOv3 의 셋째 카드 `c4d5e6f7`: 문단 둘 · `$$` 블록 수식 · 목록, [DocumentFile.md §5.1](../../format/DocumentFile.md#51-여러-줄-근거)). 이 카드에는 `개념:` 이 없어 색인 · 보기 기대값(§2 · §3)과 보기 앱 스냅샷은 그대로다
+- 형식 판: 여러 줄 근거가 있는 YOLOv3 만 `format: 2`, 나머지 문서 5편과 개념 파일은 `format: 1`
 - 핵심 숫자: 단위 없는 것(`**9000** — …`), 단위가 `%` 인 것
 - 문서 머리글: AI 가 분석한 문서 5편, 손으로 쓴 노트 1편(`rules: 0`, `edited: true`, `analysis` 없음)
 - 빈 정해진 절: 핵심 숫자가 없는 문서(2단계 노트), 데이터가 없는 문서(Focal Loss)

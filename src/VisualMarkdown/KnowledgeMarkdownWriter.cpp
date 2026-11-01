@@ -30,6 +30,10 @@ const QString kKeyQuote = QStringLiteral("인용");
 const QString kKeyStatus = QStringLiteral("상태");
 
 const QString kDocumentConceptPath = QStringLiteral("../concepts/");
+const QString kEvidenceIndent = QStringLiteral("    ");   // 근거의 이어지는 줄: 하위 항목 "  - " 의 내용 들여쓰기
+
+constexpr int kFirstFormat = 1;               // 형식 판은 1부터다
+constexpr int kMultilineEvidenceFormat = 2;   // 여러 줄 근거가 들어온 판
 
 struct HeaderField
 {
@@ -125,6 +129,48 @@ void AppendSubItem(QStringList* lines, const QString& key, const QString& value)
         *lines << QStringLiteral("  - ") + key + QStringLiteral(": ") + strValue;
 }
 
+// 근거는 여러 줄 마크다운이다(format/DocumentFile.md §5.1). 첫 줄은 `  - 근거: ` 뒤에, 둘째 줄부터는 하위 항목의
+// 내용 들여쓰기(공백 네 칸)를 붙여 쓴다. 빈 줄은 공백 없이 쓴다. 첫 줄이 울타리면 `  - 근거:` 뒤를 비우고 첫 줄부터 이어 쓴다.
+void AppendEvidence(QStringList* lines, const QString& evidence)
+{
+    const QString strEvidence = KnowledgeText::NormalizeEvidence(evidence);
+    if (strEvidence.isEmpty())
+        return;
+    QStringList vecEvidence = strEvidence.split(QLatin1Char('\n'));
+    if (vecEvidence.size() == 1)
+    {
+        AppendSubItem(lines, kKeyEvidence, strEvidence);
+        return;
+    }
+    if (KnowledgeMarkdownLayout::IsFenceLine(vecEvidence.first()))
+        *lines << QStringLiteral("  - ") + kKeyEvidence + QLatin1Char(':');
+    else
+        *lines << QStringLiteral("  - ") + kKeyEvidence + QStringLiteral(": ") + vecEvidence.takeFirst();
+    for (const QString& strLine : vecEvidence)
+        *lines << (strLine.isEmpty() ? QString() : kEvidenceIndent + strLine);
+}
+
+bool HasMultilineEvidence(const KnowledgeDocument& document)
+{
+    for (const KnowledgeCard& card : document.vecCards)
+        if (KnowledgeText::NormalizeEvidence(card.strEvidence).contains(QLatin1Char('\n')))
+            return true;
+    return false;
+}
+
+// 쓰는 판: 기록을 나타낼 수 있는 가장 낮은 판(needed). 기록의 판이 아는 판보다 높으면(더 새 파일에서 읽은 기록)
+// 그 판을 지킨다. 그래서 새 문법을 쓰지 않은 파일은 옛 판으로 남아 옛 앱이 계속 고칠 수 있다(format/Vocabulary.md §5).
+int ChooseFormat(int recordFormat, int neededFormat)
+{
+    const int iKnownFormat = KnowledgeVocabulary::Get().GetFormat();
+    return recordFormat > iKnownFormat ? std::max(recordFormat, neededFormat) : neededFormat;
+}
+
+int ChooseDocumentFormat(const KnowledgeDocument& document)
+{
+    return ChooseFormat(document.iFormat, HasMultilineEvidence(document) ? kMultilineEvidenceFormat : kFirstFormat);
+}
+
 // 모르는 하위 항목은 읽은 글자 그대로 쓴다. 줄바꿈만 공백 하나로 바꾼다.
 void AppendExtraLines(QStringList* lines, const QStringList& extraLines)
 {
@@ -204,7 +250,7 @@ QStringList BuildCards(const QVector<KnowledgeCard>& cards)
         if (!card.strId.isEmpty())
             strLine += QStringLiteral(" <!-- card:") + card.strId + QStringLiteral(" -->");
         vecLines << strLine;
-        AppendSubItem(&vecLines, kKeyEvidence, card.strEvidence);
+        AppendEvidence(&vecLines, card.strEvidence);
         AppendSubItem(&vecLines, kKeySection, card.strSection);
         QStringList vecLinks;
         for (const ConceptLink& link : card.vecConcepts)
@@ -429,7 +475,7 @@ QVector<HeaderField> MakeDocumentHeader(const KnowledgeDocument& document, const
 {
     return {
         { QStringLiteral("type"), QStringLiteral("document"), true },
-        { QStringLiteral("format"), QString::number(document.iFormat), true },
+        { QStringLiteral("format"), QString::number(ChooseDocumentFormat(document)), true },
         { QStringLiteral("id"), document.strId.simplified(), true },
         { QStringLiteral("source"), document.strSource.simplified(), false },
         { QStringLiteral("fileInfo"), document.strFileInfo.simplified(), false },
@@ -453,7 +499,7 @@ QVector<HeaderField> MakeConceptHeader(const KnowledgeConcept& concept)
     }
     return {
         { QStringLiteral("type"), QStringLiteral("concept"), true },
-        { QStringLiteral("format"), QString::number(concept.iFormat), true },
+        { QStringLiteral("format"), QString::number(ChooseFormat(concept.iFormat, kFirstFormat)), true },
         { QStringLiteral("id"), concept.strId.simplified(), true },
         { QStringLiteral("kind"), concept.strKind.simplified(), false },
         { QStringLiteral("aliases"), vecAliases.join(QStringLiteral(", ")), false, true, vecAliases },

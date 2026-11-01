@@ -1,6 +1,6 @@
 ---
 type: document
-format: 1
+format: 2
 id: 7b3e9c21-4d5f-4a6b-8c7d-3e2f1a0b9c83
 source: yolov3.pdf
 fileInfo: PDF 6쪽
@@ -9,7 +9,7 @@ learned: 2026-10-22T11:05:00+09:00
 analysis: 2c3d4e5f-6a7b-4c8d-9e0f-0a1b2c3d4e53
 rules: 1
 edited: false
-digest: 1a1ae3eab8424a458e95087e22532283f1406bce15c2107eadce702642cdb8a3
+digest: 58323022d31f337e082d1dfbde54440a025e829c0965401f6a625bba66789d79
 ---
 
 # YOLOv3: An Incremental Improvement
@@ -44,6 +44,18 @@ YOLO 에 작은 설계 변화를 여럿 더해, 조금 커졌지만 더 정확�
   - 근거: 크기마다 상자 3개, 모두 9개의 사전 상자
   - 절: 2.3
   - 개념: [YOLOv3](../concepts/yolov3.md)
+- 상자는 격자 칸과 사전 상자에서 얼마나 옮기고 늘이는지로 예측한다 <!-- card:c4d5e6f7 -->
+  - 근거: 상자마다 네 값 $t_x, t_y, t_w, t_h$ 를 낸다. 칸이 그림 왼쪽 위에서 $(c_x, c_y)$ 떨어져 있고 사전 상자가 $p_w \times p_h$ 면 상자는 이렇다.
+
+    $$
+    b_x = \sigma(t_x) + c_x, \quad b_y = \sigma(t_y) + c_y, \quad b_w = p_w e^{t_w}, \quad b_h = p_h e^{t_h}
+    $$
+
+    학습은 제곱 오차의 합으로 한다. 정답 상자에서 거꾸로 구한 값이 $\hat{t}_*$ 면 기울기는 $\hat{t}_* - t_*$ 다.
+
+    - 중심은 시그모이드를 거쳐 그 칸 안에 머문다
+    - 너비와 높이는 지수라 늘 양수다
+  - 절: 2.1
 
 ## 관계
 

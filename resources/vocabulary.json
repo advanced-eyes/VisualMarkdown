@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "rules": 1,
   "conceptKinds": [
     { "code": "method", "label": "방법", "meaning": "알고리즘 · 모델 · 기법 · 절차", "examples": "Faster R-CNN, 이분 탐색" },

@@ -1,5 +1,7 @@
 #include "VisualMarkdown/KnowledgeText.h"
 
+#include "VisualMarkdown/KnowledgeMarkdownLayout.h"
+
 #include <QHash>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -12,6 +14,7 @@ constexpr ushort kDeleteCode = 0x7f;
 constexpr int kCardIdDigits = 8;
 constexpr int kHexBase = 16;
 constexpr int kFirstDuplicateSuffix = 2;   // 겹치면 붙이는 첫 번호(id 는 "-2", 열 이름은 " 2")
+constexpr int kFenceMarkLength = 3;        // 닫는 울타리 ``` · ~~~
 
 bool IsReservedName(const QString& slug)
 {
@@ -27,6 +30,47 @@ QString TrimHyphens(QString text)
     while (text.endsWith(QLatin1Char('-')))
         text.chop(1);
     return text;
+}
+
+QString TrimRight(const QString& line)
+{
+    int iEnd = line.size();
+    while (iEnd > 0 && line[iEnd - 1].isSpace())
+        --iEnd;
+    return line.left(iEnd);
+}
+
+QString GetLeadingWhitespace(const QString& line)
+{
+    int iEnd = 0;
+    while (iEnd < line.size() && line[iEnd].isSpace())
+        ++iEnd;
+    return line.left(iEnd);
+}
+
+// lines[first] 부터 울타리를 파일 훑기(KnowledgeMarkdownLayout::Scan)와 같은 규칙으로 짝짓는다:
+// 울타리 밖의 울타리 줄이 열고, 같은 글자로 시작하는 울타리 줄이 닫는다. 끝까지 닫히지 않았으면
+// 여는 줄의 들여쓰기 + 같은 글자 셋으로 닫는 줄을 더한다(파일의 뒤 절이 코드 안으로 들어가지 않게).
+void CloseOpenFence(QStringList* lines, int first)
+{
+    int iOpen = -1;
+    QChar chFence;
+    for (int iLine = first; iLine < lines->size(); ++iLine)
+    {
+        const QString& strLine = lines->at(iLine);
+        if (!KnowledgeMarkdownLayout::IsFenceLine(strLine))
+            continue;
+        const QChar chThis = strLine.trimmed().at(0);
+        if (iOpen < 0)
+        {
+            iOpen = iLine;
+            chFence = chThis;
+        }
+        else if (chThis == chFence)
+            iOpen = -1;
+    }
+    if (iOpen >= 0)
+        *lines << GetLeadingWhitespace(lines->at(iOpen)) + QString(kFenceMarkLength, chFence);
 }
 }
 
@@ -198,5 +242,31 @@ void CleanColumns(KnowledgeTable* table)
         strY = funcRename(strY);
     for (QString& strOrdered : table->vecOrdered)
         strOrdered = funcRename(strOrdered);
+}
+
+// 앞뒤 공백 · 빈 줄을 빼고, 줄 끝 공백을 뺀다. 한 줄이면 지금처럼 이어진 공백을 하나로 접는다.
+// 여러 줄이면 첫 줄만 접고(`- 근거: ` 뒤에 쓴다) 둘째 줄부터는 들여쓰기 · 안쪽 공백을 지킨다(코드 · 목록).
+// 첫 줄이 울타리면 첫 줄도 이어지는 줄로 쓰므로 접지 않는다. 이어지는 줄의 울타리가 닫히지 않았으면 닫는 줄을 더한다.
+QString NormalizeEvidence(const QString& evidence)
+{
+    QString strText = evidence;
+    strText.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    strText.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    QStringList vecLines;
+    for (const QString& strLine : strText.split(QLatin1Char('\n')))
+        vecLines << TrimRight(strLine);
+    while (!vecLines.isEmpty() && vecLines.first().isEmpty())
+        vecLines.removeFirst();
+    while (!vecLines.isEmpty() && vecLines.last().isEmpty())
+        vecLines.removeLast();
+    if (vecLines.isEmpty())
+        return QString();
+    if (vecLines.size() == 1)
+        return vecLines.first().simplified();
+    const bool bFenceFirst = KnowledgeMarkdownLayout::IsFenceLine(vecLines.first());
+    if (!bFenceFirst)
+        vecLines.first() = vecLines.first().simplified();
+    CloseOpenFence(&vecLines, bFenceFirst ? 0 : 1);
+    return vecLines.join(QLatin1Char('\n'));
 }
 }

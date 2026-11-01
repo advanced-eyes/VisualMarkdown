@@ -1,6 +1,7 @@
 #include "VisualMarkdown/KnowledgeMarkdownReader.h"
 
 #include "VisualMarkdown/KnowledgeMarkdownLayout.h"
+#include "VisualMarkdown/KnowledgeText.h"
 #include "VisualMarkdown/KnowledgeVocabulary.h"
 
 #include <QRegularExpression>
@@ -18,6 +19,8 @@ constexpr int kMaxTableIndent = 3;          // 표 줄 앞 공백
 constexpr int kFirstFormat = 1;             // 형식 판은 1부터다. format 이 없거나 잘못 적혔으면 1 로 읽는다
 constexpr int kLinkNameGroup = 1;           // MakeLinkExpression 의 [이름]
 constexpr int kLinkPathGroup = 2;           // MakeLinkExpression 의 (경로)
+constexpr int kTabStop = 4;                 // 줄 앞 탭은 다음 4의 배수 칸까지(CommonMark)
+constexpr int kSubItemMarkerLength = 2;     // 하위 항목의 "- ". 근거의 이어지는 줄은 이만큼 더 들인다
 
 const QString kSectionOutline = QStringLiteral("차례");
 const QString kSectionKeyNumbers = QStringLiteral("핵심 숫자");
@@ -277,6 +280,101 @@ bool IsHeadLine(const QString& line)
     return !line.isEmpty() && !line.at(0).isSpace();
 }
 
+// 줄 앞 공백의 칸 수. 탭은 다음 4의 배수 칸까지 센다(CommonMark 와 같다).
+int MeasureIndent(const QString& line)
+{
+    int iColumns = 0;
+    for (const QChar ch : line)
+    {
+        if (ch == QLatin1Char(' '))
+            ++iColumns;
+        else if (ch == QLatin1Char('\t'))
+            iColumns += kTabStop - iColumns % kTabStop;
+        else
+            break;
+    }
+    return iColumns;
+}
+
+// 줄 앞 공백을 columns 칸까지(있는 만큼) 뗀다. 뗄 칸이 탭 가운데에 걸리면 남는 칸은 공백으로 둔다.
+QString RemoveIndent(const QString& line, int columns)
+{
+    int iColumn = 0;
+    int iIndex = 0;
+    while (iIndex < line.size() && iColumn < columns)
+    {
+        const QChar ch = line[iIndex];
+        int iNextColumn = 0;
+        if (ch == QLatin1Char(' '))
+            iNextColumn = iColumn + 1;
+        else if (ch == QLatin1Char('\t'))
+            iNextColumn = iColumn + kTabStop - iColumn % kTabStop;
+        else
+            break;
+        ++iIndex;
+        if (iNextColumn > columns)
+            return QString(iNextColumn - columns, QLatin1Char(' ')) + line.mid(iIndex);
+        iColumn = iNextColumn;
+    }
+    return line.mid(iIndex);
+}
+
+// 카드 구조로 보이는 줄: id 주석이 있는 카드 첫 줄, 또는 근거의 내용 들여쓰기보다 덜 들인 카드의 아는 하위 항목(근거 · 절 · 개념).
+// 손으로 쓴 근거의 울타리가 닫히지 않았을 때 이런 줄을 넘어 닫는 줄을 찾으면 뒤 카드를 삼킨다.
+bool IsCardStructureLine(const QString& line, int contentIndent)
+{
+    static const QRegularExpression reCardHead(QStringLiteral(R"re(^- .* <!-- card:[0-9a-f]{8} -->$)re"));
+    if (reCardHead.match(line).hasMatch())
+        return true;
+    QString strKey, strValue, strRaw;
+    return MeasureIndent(line) < contentIndent && ParseSubItem(line, &strKey, &strValue, &strRaw)
+        && (strKey == kKeyEvidence || strKey == kKeySection || strKey == kKeyConcepts);
+}
+
+// 근거 안 울타리 줄 open 을 닫는 줄(파일 훑기와 같은 규칙: 같은 글자로 시작하는 울타리 줄). 그 앞에 카드 구조로 보이는 줄이
+// 있거나 닫는 줄이 없으면 -1.
+int FindFenceClose(const QStringList& lines, int open, int contentIndent)
+{
+    const QChar chFence = lines[open].trimmed().at(0);
+    for (int iLine = open + 1; iLine < lines.size(); ++iLine)
+    {
+        if (KnowledgeMarkdownLayout::IsFenceLine(lines[iLine]) && lines[iLine].trimmed().at(0) == chFence)
+            return iLine;
+        if (IsCardStructureLine(lines[iLine], contentIndent))
+            return -1;
+    }
+    return -1;
+}
+
+// `- 근거:` 줄 다음(first)부터 근거의 이어지는 줄을 evidence 에 더하고, 더하지 않은 첫 줄 번호를 돌려준다.
+// 이어지는 줄 = contentIndent 칸 이상 들인 줄(그만큼 떼고 남은 들여쓰기는 지킨다). 빈 줄은 다음 비지 않은 줄이
+// 이어지는 줄일 때만 넣는다. 이어지는 줄이 울타리를 열고 카드 구조로 보이는 줄 전에 닫히면 닫는 줄까지는 빈 줄 ·
+// 들여쓰기와 상관없이 넣는다(파일 훑기가 코드로 보는 범위와 같다. 덜 들인 줄은 있는 만큼만 뗀다).
+int ReadEvidenceLines(const QStringList& lines, int first, int contentIndent, QStringList* evidence)
+{
+    int iLine = first;
+    while (iLine < lines.size())
+    {
+        int iNext = iLine;
+        while (iNext < lines.size() && lines[iNext].isEmpty())
+            ++iNext;
+        if (iNext >= lines.size() || MeasureIndent(lines[iNext]) < contentIndent)
+            break;
+        for (; iLine < iNext; ++iLine)
+            *evidence << QString();
+        int iLast = iNext;
+        if (KnowledgeMarkdownLayout::IsFenceLine(lines[iNext]))
+        {
+            const int iClose = FindFenceClose(lines, iNext, contentIndent);
+            if (iClose >= 0)
+                iLast = iClose;
+        }
+        for (; iLine <= iLast; ++iLine)
+            *evidence << RemoveIndent(lines[iLine], contentIndent);
+    }
+    return iLine;
+}
+
 // 하위 항목은 바로 앞까지 이어진 항목에만 붙는다. 빈 줄이나 읽지 못한 첫 줄 뒤의 하위 항목은 읽지 못한 줄이다
 // (손으로 적은 줄이 이웃 항목의 값을 덮지 않고, 절 끝에 다시 쓴 읽지 못한 줄도 다음 읽기에서 붙지 않는다).
 void ReadCards(const QStringList& lines, KnowledgeDocument* doc, QVector<int>* unread)
@@ -301,7 +399,12 @@ void ReadCards(const QStringList& lines, KnowledgeDocument* doc, QVector<int>* u
             }
             KnowledgeCard& card = doc->vecCards.last();
             if (strKey == kKeyEvidence)
-                card.strEvidence = strValue;
+            {
+                // 근거는 여러 줄 마크다운이다: `- 근거:` 줄의 들여쓰기 + 2 칸 이상 들인 다음 줄들이 이어지는 줄이다
+                QStringList vecEvidence { strValue };
+                iLine = ReadEvidenceLines(lines, iLine + 1, MeasureIndent(strLine) + kSubItemMarkerLength, &vecEvidence) - 1;
+                card.strEvidence = KnowledgeText::NormalizeEvidence(vecEvidence.join(QLatin1Char('\n')));
+            }
             else if (strKey == kKeySection)
                 card.strSection = strValue;
             else if (strKey == kKeyConcepts)

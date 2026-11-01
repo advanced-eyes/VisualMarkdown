@@ -228,6 +228,23 @@ constexpr const char* kUnitlessNumber = "9000";                               //
 constexpr const char* kUnitlessNumberLabel = "검출할 수 있는 클래스 수";
 constexpr const char* kPercentNumber = "99.5";                                // 결제 기획서 핵심 숫자, 단위 %
 constexpr int kAnalyzedDocuments = 5;                                         // analysis 가 있는 문서(손으로 쓴 노트만 없다)
+// 여러 줄 근거: YOLOv3 셋째 카드(문단 둘 · $$ 수식 · 목록). 이 카드가 있는 YOLOv3 만 2판이고 나머지는 1판이다.
+constexpr int kMultilineCardIndex = 2;
+constexpr const char* kMultilineCardId = "c4d5e6f7";
+constexpr const char* kMultilineEvidence =
+    "상자마다 네 값 $t_x, t_y, t_w, t_h$ 를 낸다. 칸이 그림 왼쪽 위에서 $(c_x, c_y)$ 떨어져 있고 사전 상자가 $p_w \\times p_h$ 면 상자는 이렇다.\n"
+    "\n"
+    "$$\n"
+    "b_x = \\sigma(t_x) + c_x, \\quad b_y = \\sigma(t_y) + c_y, \\quad b_w = p_w e^{t_w}, \\quad b_h = p_h e^{t_h}\n"
+    "$$\n"
+    "\n"
+    "학습은 제곱 오차의 합으로 한다. 정답 상자에서 거꾸로 구한 값이 $\\hat{t}_*$ 면 기울기는 $\\hat{t}_* - t_*$ 다.\n"
+    "\n"
+    "- 중심은 시그모이드를 거쳐 그 칸 안에 머문다\n"
+    "- 너비와 높이는 지수라 늘 양수다";
+constexpr const char* kMultilineSection = "2.1";
+constexpr int kMultilineFormat = 2;
+constexpr int kSingleLineFormat = 1;
 
 // ================================================================================================
 
@@ -954,6 +971,19 @@ private slots:
         QVERIFY(pYolo != nullptr);
         QVERIFY(pYolo->document.vecCards.size() >= 2);
         QCOMPARE(pYolo->document.vecCards[1].vecExtraLines, QStringList { DecodeUtf8(kYoloMemo) });
+
+        // YOLOv3 셋째 카드의 여러 줄 근거: 글자 그대로 읽힌다(개념 링크가 없어 색인 · 보기는 그대로다). 그 문서만 2판이다.
+        const ShowcaseDocument* pYolov3 = FindDocument(DecodeUtf8(kYolov3));
+        QVERIFY(pYolov3 != nullptr);
+        QVERIFY(pYolov3->document.vecCards.size() > kMultilineCardIndex);
+        const KnowledgeCard& multiline = pYolov3->document.vecCards[kMultilineCardIndex];
+        QCOMPARE(multiline.strId, QString(kMultilineCardId));
+        QCOMPARE(multiline.strEvidence, DecodeUtf8(kMultilineEvidence));
+        QCOMPARE(multiline.strSection, QString(kMultilineSection));
+        QVERIFY(multiline.vecConcepts.isEmpty());
+        QVERIFY(multiline.vecExtraLines.isEmpty());
+        for (const ShowcaseDocument& doc : m_vecDocuments)
+            QCOMPARE(doc.document.iFormat, &doc == pYolov3 ? kMultilineFormat : kSingleLineFormat);
 
         // 핵심 숫자: 단위 없는 것(YOLO9000), 단위가 % 인 것(결제 기획서)
         const KnowledgeKeyNumber* pUnitless = FindKeyNumber(DecodeUtf8(kYolo9000), DecodeUtf8(kUnitlessNumber));

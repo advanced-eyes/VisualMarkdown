@@ -13,7 +13,7 @@ private slots:
     void loadsSpecVocabulary()
     {
         const KnowledgeVocabulary& vocabulary = KnowledgeVocabulary::Get();
-        QCOMPARE(vocabulary.GetFormat(), 1);
+        QCOMPARE(vocabulary.GetFormat(), 2);
         QCOMPARE(vocabulary.GetRules(), 1);
         QCOMPARE(vocabulary.GetConceptCodes(), QStringList({ "method", "component", "task", "data", "metric", "system", "idea" }));
         QCOMPARE(vocabulary.GetRelationCodes(), QStringList({ "improves", "uses", "isA", "solves", "alternative" }));
