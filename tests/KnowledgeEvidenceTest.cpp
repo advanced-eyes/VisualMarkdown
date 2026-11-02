@@ -105,6 +105,15 @@ QString CheckRewriteKeepsSections(const QString& text)
         return QStringLiteral("second rewrite differs\n") + strSecond;
     return QString();
 }
+
+// 파일 훑기(KnowledgeMarkdownLayout::Scan)가 text 에서 찾은 절 이름(차례대로)
+QStringList ScanSectionNames(const QString& text)
+{
+    QStringList vecNames;
+    for (const KnowledgeSectionRange& section : KnowledgeMarkdownLayout::Scan(text).vecSections)
+        vecNames << section.strName;
+    return vecNames;
+}
 }
 
 // 카드 근거의 여러 줄 마크다운(format/DocumentFile.md §5.1): 쓰기 · 읽기 · 정리 · 판
@@ -550,13 +559,7 @@ private slots:
     // (항목이 끝난다) 앞에서 닫힌다. 담는 목록 항목이 없는 맨 바깥 울타리는 지금처럼 같은 글자 울타리 줄에서만 닫힌다.
     void scanClosesListFenceWhenItemEnds()
     {
-        const auto funcNames = [](const QString& tail)
-        {
-            QStringList vecNames;
-            for (const KnowledgeSectionRange& section : KnowledgeMarkdownLayout::Scan(KnowledgeTestData::CanonicalDocument() + tail).vecSections)
-                vecNames << section.strName;
-            return vecNames;
-        };
+        const auto funcNames = [](const QString& tail) { return ScanSectionNames(KnowledgeTestData::CanonicalDocument() + tail); };
         // 목록 안 울타리 뒤의 들여 쓰지 않은 ## 줄은 절이다
         QVERIFY(funcNames(DecodeUtf8("\n## 내 메모\n\n- 목록\n  ```\n  코드\n\n## 둘째 메모\n\n글\n")).contains(DecodeUtf8("둘째 메모")));
         // 항목 내용 칸(2) 이상 들인 닫는 줄은 울타리를 닫는다(여는 줄보다 덜 들였어도)
@@ -583,13 +586,6 @@ private slots:
     // 담는 항목이 없으면 1–3칸 들였어도 맨 바깥 울타리이고, 담는 곳보다 4칸 이상 들인 ``` 줄은 울타리가 아니다(들여 쓴 코드 · 문단 글).
     void fenceClosesWithItsListItem()
     {
-        const auto funcNames = [](const QString& text)
-        {
-            QStringList vecNames;
-            for (const KnowledgeSectionRange& section : KnowledgeMarkdownLayout::Scan(text).vecSections)
-                vecNames << section.strName;
-            return vecNames;
-        };
         const QString strBase = KnowledgeTestData::CanonicalDocument();
 
         // (가) 근거 안 1–3칸 들인 울타리는 근거 항목 안 울타리다: 내용이 덜 들여 써져도 같은 글자 닫는 줄로 닫힌다(줄이 늘지 않는다)
@@ -606,16 +602,16 @@ private slots:
         QCOMPARE(KnowledgeText::NormalizeEvidence(DecodeUtf8("목록\n- a\n  ```\nx\n  ```")), DecodeUtf8("목록\n- a\n  ```\nx\n  ```\n  ```"));
 
         // (나) 맨 바깥에서 1–3칸 들인 울타리 안의 ## 줄은 절이 아니다. 정해진 절 이름이어도 그 절을 두 번 보지 않고 사용자 메모가 갈라지지 않는다
-        const QString strMemo = DecodeUtf8("  ```\nx = 1\n## 관계\n  ```\n\n글\n");
         for (const QString& strName : { DecodeUtf8("아님"), DecodeUtf8("관계") })
         {
             const QString strText = strBase + DecodeUtf8("\n## 내 메모\n\n  ```\nx = 1\n## ") + strName + DecodeUtf8("\n  ```\n\n글\n");
-            const QStringList vecNames = funcNames(strText);
+            const QStringList vecNames = ScanSectionNames(strText);
             QCOMPARE(vecNames.last(), DecodeUtf8("내 메모"));
             QCOMPARE(vecNames.count(DecodeUtf8("관계")), 1);
             const QString strWhy = CheckRewriteKeepsSections(strText);
             QVERIFY2(strWhy.isEmpty(), qUtf8Printable(strWhy));
         }
+        const QString strMemo = DecodeUtf8("  ```\nx = 1\n## 관계\n  ```\n\n글\n");
         const QString strOwned = strBase + DecodeUtf8("\n## 내 메모\n\n") + strMemo;
         const QString strOwnedWritten = KnowledgeMarkdownWriter::WriteDocument(KnowledgeMarkdownReader::ReadDocument(strOwned).document, strOwned);
         QVERIFY2(strOwnedWritten.endsWith(DecodeUtf8("\n## 내 메모\n\n") + strMemo), qUtf8Printable(strOwnedWritten));
@@ -628,7 +624,7 @@ private slots:
 
         // (라) 지식 절 끝의 1칸 들인 울타리(카드 목록이 빈 줄 뒤 끝났다) 안 ## 줄은 절이 아니다
         const QString strCards = ReplaceCards(DecodeUtf8(kCanonicalCard) + DecodeUtf8("\n ```\n코드\n## 가짜\n ```\n"));
-        QVERIFY(!funcNames(strCards).contains(DecodeUtf8("가짜")));
+        QVERIFY(!ScanSectionNames(strCards).contains(DecodeUtf8("가짜")));
         const DocumentReadResult cards = KnowledgeMarkdownReader::ReadDocument(strCards);
         QCOMPARE(cards.hashUnreadLines.value(DecodeUtf8("지식")),
                  QStringList({ QStringLiteral(" ```"), DecodeUtf8("코드"), DecodeUtf8("## 가짜"), QStringLiteral(" ```") }));
@@ -636,17 +632,17 @@ private slots:
         QVERIFY2(strCardsWhy.isEmpty(), qUtf8Printable(strCardsWhy));
 
         // 맨 바깥 들여쓰기 0 · 1 · 3 울타리: 같은 글자 줄로만 닫히고, 닫지 않으면 뒤 ## 줄을 절로 보지 않는다
-        for (int iIndent : { 0, 1, 3 })
+        for (const int iIndent : { 0, 1, 3 })
         {
             const QString strIndent(iIndent, QLatin1Char(' '));
-            const QStringList vecClosed = funcNames(strBase + DecodeUtf8("\n## 내 메모\n\n") + strIndent + DecodeUtf8("```\nx\n## 아님\n") + strIndent
-                                                    + DecodeUtf8("```\n## 둘째 메모\n"));
+            const QStringList vecClosed = ScanSectionNames(strBase + DecodeUtf8("\n## 내 메모\n\n") + strIndent + DecodeUtf8("```\nx\n## 아님\n") + strIndent
+                                                           + DecodeUtf8("```\n## 둘째 메모\n"));
             QVERIFY2(!vecClosed.contains(DecodeUtf8("아님")) && vecClosed.contains(DecodeUtf8("둘째 메모")), qPrintable(QString::number(iIndent)));
-            const QStringList vecOpen = funcNames(strBase + DecodeUtf8("\n## 내 메모\n\n") + strIndent + DecodeUtf8("```\nx\n## 아님\n"));
+            const QStringList vecOpen = ScanSectionNames(strBase + DecodeUtf8("\n## 내 메모\n\n") + strIndent + DecodeUtf8("```\nx\n## 아님\n"));
             QCOMPARE(vecOpen.last(), DecodeUtf8("내 메모"));
         }
         // 담는 곳보다 4칸 이상 들인 ``` 줄은 울타리가 아니다: 뒤 ## 줄은 절이다
-        QVERIFY(funcNames(strBase + DecodeUtf8("\n## 내 메모\n\n문단\n    ```\n## 둘째 메모\n")).contains(DecodeUtf8("둘째 메모")));
+        QVERIFY(ScanSectionNames(strBase + DecodeUtf8("\n## 내 메모\n\n문단\n    ```\n## 둘째 메모\n")).contains(DecodeUtf8("둘째 메모")));
     }
 
     // 쓰기가 만든 정해진 절 끝에 맨 바깥 울타리가 열린 채 남으면(읽지 못한 울타리 줄) 그 절 끝에 닫는 줄을 더한다.
