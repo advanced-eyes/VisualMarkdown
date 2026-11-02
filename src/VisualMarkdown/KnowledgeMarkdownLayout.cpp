@@ -183,11 +183,16 @@ int AdvanceIndent(int column, QChar ch)
     return -1;
 }
 
+bool IsThematicBreak(const QString& line);
+
 // 목록 표지 줄(`-` · `*` · `+` · `1.` · `1)` 뒤에 공백이나 줄 끝)이면 그 항목의 내용 들여쓰기(CommonMark), 아니면 -1.
 // 내용 칸 = 표지 끝 칸 + 뒤 공백 칸. 뒤가 비었거나 공백이 4칸을 넘으면(들여 쓴 코드로 시작) 표지 끝 칸 + 1.
+// 가로줄 꼴(`- - -` · `* * *`)은 목록 표지가 아니다(CommonMark 는 가로줄이 먼저다).
 int MeasureListContentIndent(const QString& line)
 {
     static const QRegularExpression reMarker(QStringLiteral(R"re(^(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))re"));
+    if (IsThematicBreak(line))
+        return -1;
     int iIndex = 0;
     const int iIndent = KnowledgeMarkdownLayout::MeasureIndent(line, &iIndex);
     const QRegularExpressionMatch match = reMarker.match(line.mid(iIndex));
@@ -365,8 +370,9 @@ int FindFenceContainer(const QStringList& lines, int open)
         const int iIndent = MeasureIndent(lines[iLine]);
         if (iIndent >= iBound)
             continue;
+        // iBound 는 울타리와 그 사이 비지 않은 줄들의 가장 얕은 들여쓰기다. 내용 칸이 그보다 깊은 항목은 그 사이에 이미 끝났다.
         const int iContent = MeasureListContentIndent(lines[iLine]);
-        if (iContent >= 0 && iContent <= iFenceIndent)
+        if (iContent >= 0 && iContent <= iBound)
             return iContent;
         iBound = iIndent;
     }

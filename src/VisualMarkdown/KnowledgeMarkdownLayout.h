@@ -54,8 +54,9 @@ QString Normalize(const QString& text);
 KnowledgeLayout Scan(const QString& text);
 bool IsFenceLine(const QString& line);
 // lines[open](울타리 줄)을 담는 목록 항목의 내용 들여쓰기. 없으면(맨 바깥 울타리) -1.
-// 앞 줄을 거슬러 올라가며, 지금 기준(처음엔 울타리 들여쓰기 k)보다 덜 들인 비지 않은 줄이 내용 들여쓰기 c ≤ k 인
-// 목록 표지 줄이면 그 c 다. 아니면 기준을 그 줄 들여쓰기로 낮추고 계속 올라간다. 기준이 0 이 되면 맨 바깥이다.
+// 앞 줄을 거슬러 올라가며, 지금 기준(처음엔 울타리 들여쓰기 k)보다 덜 들인 비지 않은 줄이 내용 들여쓰기 c ≤ 기준인
+// 목록 표지 줄이면 그 c 다(기준은 그 사이 줄들의 가장 얕은 들여쓰기라, 그 사이에 끝난 항목은 담지 않는다). 아니면 기준을
+// 그 줄 들여쓰기로 낮추고 계속 올라간다. 기준이 0 이 되면 맨 바깥이다. 가로줄 꼴은 목록 표지가 아니다.
 int FindFenceContainer(const QStringList& lines, int open);
 // lines[open](울타리 줄)이 여는 울타리 블록의 끝 줄. 같은 글자로 시작하는 울타리 줄이 닫는다. 목록 항목 안 울타리는
 // 그 항목의 내용 들여쓰기보다 덜 들인 비지 않은 줄(항목이 끝난다) 앞에서도 닫힌다(CommonMark). 담는 곳(맨 바깥은 0)보다

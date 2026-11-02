@@ -645,6 +645,29 @@ private slots:
         QVERIFY(ScanSectionNames(strBase + DecodeUtf8("\n## 내 메모\n\n문단\n    ```\n## 둘째 메모\n")).contains(DecodeUtf8("둘째 메모")));
     }
 
+    // 이미 끝난 목록 항목과 가로줄은 울타리를 담지 않는다(CommonMark). 그 뒤 들인 울타리는 맨 바깥 울타리라 같은 글자 줄로만 닫힌다.
+    void fenceIsNotHeldByEndedItemOrBreak()
+    {
+        const QString strBase = KnowledgeTestData::CanonicalDocument() + DecodeUtf8("\n## 내 메모\n\n");
+        // (빈 줄 없이 덜 들인 줄은 게으른 이어짐이라 CommonMark 에선 항목이 이어진다. 옛 Scan 부터의 한계라 여기서 보지 않는다, ReadWrite.md §8)
+        const QStringList vecBefores {
+            DecodeUtf8("- a\n\n para\n"),   // 빈 줄 뒤 내용 칸(2)보다 덜 들인 문단이 항목을 끝냈다
+            DecodeUtf8("- - -\n"),          // 가로줄
+            DecodeUtf8("* * *\n"),
+            DecodeUtf8("*  *  *\n"),
+            DecodeUtf8("- a\n\n- - -\n"),   // 목록 뒤 가로줄
+        };
+        for (const QString& strBefore : vecBefores)
+        {
+            const QStringList vecNames = ScanSectionNames(strBase + strBefore + DecodeUtf8("  ```\nx\n## 아님\n  ```\n## 둘째 메모\n"));
+            QVERIFY2(!vecNames.contains(DecodeUtf8("아님")) && vecNames.contains(DecodeUtf8("둘째 메모")),
+                     qUtf8Printable(strBefore + QStringLiteral(" => ") + vecNames.join(QStringLiteral(" | "))));
+        }
+        // 끝나지 않은 항목(빈 줄 뒤에도 내용 칸만큼 들인 문단)은 여전히 울타리를 담는다
+        const QStringList vecHeld = ScanSectionNames(strBase + DecodeUtf8("- a\n\n  para\n  ```\nx\n## 둘째 메모\n"));
+        QVERIFY(vecHeld.contains(DecodeUtf8("둘째 메모")));
+    }
+
     // 쓰기가 만든 정해진 절 끝에 맨 바깥 울타리가 열린 채 남으면(읽지 못한 울타리 줄) 그 절 끝에 닫는 줄을 더한다.
     // 써 낸 파일에서 어떤 정해진 절도 뒤 절을 삼키지 않는다.
     void writerClosesTopLevelFenceAtSectionEnd()
